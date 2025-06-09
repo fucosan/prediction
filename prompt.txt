@@ -1,0 +1,382 @@
+"""
+We are working with a transactional dataset df that includes sales records with at least the following columns:
+- Date: the transaction date
+- Site_No: store identifier
+- Item_No: product identifier
+- Quantity: the number of units sold in a given transaction
+
+The Date column is not a complete time series — if a date is missing for a specific (Site_No, Item_No) combination, it indicates zero sales on that date.
+
+======================================================================
+OBJECTIVES
+======================================================================
+
+Transform and enrich the dataset through the following phases:
+
+----------------------------------------------------------------------
+1. INITIAL CLEANING
+----------------------------------------------------------------------
+- Drop the following columns if they exist:
+
+    drop_cols = [
+        'Total_Sales_Incl_PPN_IDR',
+        'Selling_Price_Incl_PPN_IDR',
+        'Periodic_Disc_Amount_incl_PPN_IDR',
+        'Add_Periodic_Disc_Amount_IDR',
+        'Amount_Discount_Tambahan_incl_PPN_IDR',
+        'Vendor_No', 'Master_Brand_Name', 'Unit_of_Measure',
+        'item_mitra_10', 'kode_item_m10', 'kode_item_m10(cons)',
+        'item_mitra_10(cons)', 'kode_item_onda', 'mapping_nama_item_onda',
+        'produksi', 'benchmark_new_item', 'dus', 'category'
+    ]
+
+- For percentage columns:
+    - "Periodic_Disc_Percentage"
+    - "Periodic_Disc_CC_Percentage"
+    - "Discount_Tambahan_Percentage"
+    
+    Convert them from strings like '3%' or raw numeric 0 to proper float values (e.g., 0.03 or 0.00)
+
+----------------------------------------------------------------------
+1B. NAME NORMALIZATION
+----------------------------------------------------------------------
+- Ensure consistent naming for key identifier columns:
+    - Item_No ↔ Item_Name
+    - Site_No ↔ Site_Name
+    - Vendor_No ↔ Vendor_Name (if Vendor_No is not dropped)
+
+- For each:
+    - Create a mapping from the code column to the most common corresponding name
+        - Example: for Item_No, use the most frequent Item_Name
+    - Apply the mapping to standardize:
+        - Item_Name, Site_Name, and Vendor_Name accordingly
+- This ensures that every (Item_No, Site_No, Vendor_No) has a *single, consistent name* representation
+
+
+----------------------------------------------------------------------
+2. DAILY TIME SERIES NORMALIZATION
+----------------------------------------------------------------------
+- Ensure each (Site_No, Item_No, Date) is *unique*
+    - If duplicates exist, aggregate Quantity using sum
+- Generate a complete daily date range per group. 
+- Fill missing dates with Quantity = 0
+- When new rows are generated to fill in the missing dates:
+    - All *other columns* (e.g., brand name, price-related fields, category info) must be:
+        - *Forward-filled* (ffill()) or *backfilled* (bfill()) within the group
+        - Or filled with the *first known value* from the group, assuming they are constant
+    - This ensures consistency across all features and no unexpected NaN in final features
+
+----------------------------------------------------------------------
+3. FEATURE ENGINEERING (on daily-level data)
+----------------------------------------------------------------------
+
+a. *Lag Features*:
+- Create lag_1, lag_2, ..., lag_n of Quantity (parameterizable)
+- Use shift(n) to exclude current-day data
+- Any resulting NaN from insufficient history (e.g., first few rows) must be filled with 0
+
+b. *Rolling Window Features*:
+- For each window size k, generate:
+    - rolling_mean_k, rolling_sum_k, rolling_std_k
+- Apply on Quantity.shift(1) to avoid leakage
+- Fill any resulting NaN values with 0 to ensure no missing values in final features
+
+c. *Days Since Last Sale*:
+- Create days_since_last_sale
+    - Resets to 0 when Quantity > 0, increments when Quantity == 0
+
+d. *Holiday Features (Indonesia)*:
+- Get holiday calendar from first year to last year in the dataset
+- Add:
+    - IsHoliday: Boolean flag
+    - HolidayName: normalized name (e.g., both "Christmas 2024" and "Christmas 2025" → "Christmas")
+        - If not a holiday, assign "not_holiday"
+    - DaysToNextHoliday: Days until the next known holiday
+    - DaysSinceLastHoliday: Days since the last known holiday
+
+e. *Calendar Features*:
+- Extract:
+    - Month: numeric month (1–12)
+    - Week: ISO week number
+    - Year: the year of data
+    - IsPaydayWindow: Boolean — True if date falls within 25th to 1st (inclusive)
+
+f. *isPromo Feature*:
+- Create a new feature isPromo to capture unusually high sales activity
+    - For each (Site_No, Item_No) group:
+        - Calculate the *Q3 (75th percentile)* of daily Quantity
+        - For each day:
+            - If Quantity > Q3 → isPromo = 1
+            - Else → isPromo = 0
+- This can be used as a proxy to detect *promotion periods* or abnormal demand spikes
+
+----------------------------------------------------------------------
+4. 2-WEEK AGGREGATION
+----------------------------------------------------------------------
+
+- Aggregate daily data into non-overlapping 14-day windows per (Site_No, Item_No)
+
+- For each period, compute:
+    - Total Quantity
+    - Aggregated features:
+        - Use appropriate aggregation functions (e.g., mean, sum, last, etc.) for lag/rolling/statistical/calendar features
+
+- Create and include:
+    - Start_Date: the first day of the 14-day window
+    - End_Date: the last day of the 14-day window
+
+- Special Handling:
+    - Start_Date and End_Date must *not* be treated as input features
+        - Do *not* apply aggregation (e.g., mean, mode) to them
+        - Do *not* include them in numerical_columns or use them during model training
+    - These fields are used strictly for:
+        - Time grouping
+        - Evaluation filtering (e.g., test split)
+        - Exporting predictions
+
+
+----------------------------------------------------------------------
+5. DATA TYPE CLASSIFICATION
+----------------------------------------------------------------------
+a. Feature Type Separation:
+- Separate all columns into two categories:
+
+    - numerical_columns:
+        - Includes:
+            - Quantity, PriceList, and all generated features such as:
+                - Lag features (e.g., lag_1, lag_2, ...)
+                - Rolling features (e.g., rolling_mean_3, rolling_sum_7)
+                - Statistical or recency-based features (e.g., days_since_last_sale)
+                - Calendar-based numeric fields (e.g., Month, Week, Year)
+        - Excludes:
+            - Any raw date or text-based fields
+            - Quantity itself will not be scaled during normalization
+
+    - categorical_columns:
+        - Includes:
+            - Categorical fields like HolidayName, IsHoliday, IsPaydayWindow, isPromo, etc.
+            - Also includes any remaining non-numeric columns used as model inputs
+        - Explicitly includes:
+            - Site_No and Item_No
+        - Note: Site_No and Item_No are always treated as categorical identifiers even if they are numeric-looking
+
+b. Handling of Date Fields:
+- The following columns should be *excluded* from both numerical_columns and categorical_columns:
+    - Date
+    - Start_Date
+    - End_Date
+
+- These date fields must be treated as:
+    - *Timestamps*, used only for:
+        - Filtering and slicing time windows (e.g., train/test split)
+        - Grouping and joining
+        - Generating derived temporal features (e.g., Month, Week, Year)
+
+- Do *not*:
+    - Normalize, encode, or include them in the feature matrix X
+    - Pass them directly to the model
+
+c. Output:
+- Return or log two lists for visibility and debugging:
+    - numerical_columns
+    - categorical_columns
+
+- These lists will be used for:
+    - Feature normalization
+    - Categorical encoding
+    - Feature selection pipelines
+
+----------------------------------------------------------------------
+6. DATA NORMALIZATION & TRAINING PREPARATION
+----------------------------------------------------------------------
+
+- Before training, prepare the feature matrix X and target variable y
+
+a. Numerical Feature Normalization:
+- All columns listed in numerical_columns *except*:
+    - Quantity (do NOT scale this)
+    - Start_Date, End_Date (do NOT scale or include as model features)
+
+- These columns are used only for time filtering and grouping, not prediction.
+
+- Apply normalization using:
+    - MinMaxScaler or a better alternative (e.g., RobustScaler, StandardScaler) depending on outlier behavior
+
+- Resulting scaled values should be stored in a transformed dataframe (or pipeline-compatible)
+
+b. *Categorical Feature Encoding*:
+- Categorical columns (categorical_columns) must be properly encoded *except*:
+    - Site_No and Item_No, which should *not be encoded*
+        - They are identifiers used for grouping or joining only
+- Remaining categorical features:
+    - Use *one-hot encoding* or *label encoding* depending on downstream model requirements
+    - For tree-based models (e.g., XGBoost, LightGBM), label encoding is acceptable
+    - For linear models or neural networks, use one-hot encoding
+
+c. *Output for Training*:
+- Prepare final dataset with:
+    - Feature matrix X (numerical + encoded categorical features)
+    - Target variable y (typically Quantity or any other regression target)
+
+d. *Train / Test Split*:
+- Split the final dataset into training and test sets based on the End_Date (or Date) column:
+    - Use the *last 2 months of data as the test set*
+    - All data before that will be used as the training set
+- This simulates realistic future prediction scenarios and avoids data leakage
+
+----------------------------------------------------------------------
+7. MODEL TRAINING WITH XGBOOST
+----------------------------------------------------------------------
+
+a. Model Training:
+- Use *XGBoost* to train a regression model to predict Quantity
+    - Input: X_train (features), y_train (target)
+    - Output: trained XGBoost model
+
+b. Evaluation Metrics:
+- Evaluate model performance using:
+    - *Root Mean Squared Error (RMSE)*
+    - *Mean Absolute Error (MAE)*
+
+- Report these metrics on the *test set*
+
+c. Visualization:
+- Plot the *actual vs predicted Quantity* values on the test set:
+    - Use line plots
+    - Show the first 100 samples
+    - Include a legend for:
+        - "Actual"
+        - "Predicted"
+    - Title: Actual vs Combined Predicted Quantity (first 100 points)
+    - Label X-axis: Time Index
+    - Label Y-axis: Quantity
+
+- This plot helps visually assess prediction alignment and model sharpness
+
+d. Feature Importance:
+- After training, extract and display *feature importance* using:
+    - Gain or weight-based importance from XGBoost
+- Visualize top N most important features using a bar chart:
+    - X-axis: feature names
+    - Y-axis: importance score
+    - Title: Top N Important Features (XGBoost)
+- This helps identify which features contribute most to predictions
+
+---------------------------------------------------------------------
+8. RECURSIVE PREDICTION ON TEST SET
+----------------------------------------------------------------------
+
+a. Motivation:
+- Some features (e.g., lag, rolling, days_since_last_sale) depend on past Quantity values.
+- During training, these features use the actual historical values.
+- During testing (or forecasting), true future Quantity values are not known, so we must:
+    → Use previously predicted values to *recompute dependent features recursively*
+
+b. Strategy:
+- Implement a *recursive prediction loop* across the test set:
+    - For each date in the test period:
+        - Compute features using known past data
+        - Predict Quantity
+        - Feed the prediction into future steps to update dependent features (e.g., lag_1, rolling_mean_3, etc.)
+
+c. Prediction Flow:
+- Start from the *last known training row* for each (Site_No, Item_No) group
+- Iterate through the test dates *chronologically*
+- For each step:
+    - Generate necessary lag/rolling features using latest predicted values
+    - Predict Quantity
+    - Store prediction and update history
+- Repeat for entire test window
+
+d. Output:
+- Generate:
+    - y_test_pred_recursive: list of recursively predicted quantities
+    - Use it to recompute RMSE, MAE, and prediction graphs
+    - Plot side-by-side with original test prediction (if available) for comparison
+
+ e. Export:
+- Save results to a CSV file:
+    - Columns:
+        - Start_Date, End_Date, Site_No, Item_No, Site_Name, Item_Name
+        - actual_quantity, predicted_quantity_recursive
+    - Filename: xgboost_recursive_predictions.csv
+- Ensure:
+
+    - One row per predicted date per product-site pair
+    - Sorted  End_Date if applicable
+
+f. Additional Notes:
+- use model that we save on train process.
+- use data tha we have already generated (X_test, y_test)
+- Ensure model’s performance is evaluated based on *recursive predictions only*
+- This approach simulates how the model will behave *in production*
+- Helps identify error accumulation due to recursive feedback loop
+
+----------------------------------------------------------------------
+9. NORMAL PREDICTION TEST
+----------------------------------------------------------------------
+
+a. Purpose:
+- Evaluate model performance in *ideal test conditions*, where all features are computed using actual historical data
+- Serves as a *baseline* to compare against recursive predictions
+
+b. Prediction:
+- Use the trained XGBoost model to predict Quantity:
+    - Input: X_test (which includes lag/rolling features computed using true past Quantity)
+    - Output: y_test_pred_normal
+
+c. Evaluation:
+- Compare y_test_pred_normal with ground-truth y_test
+- Compute:
+    - RMSE (Root Mean Squared Error)
+    - MAE (Mean Absolute Error)
+
+d. Visualization:
+- Plot line chart:
+    - Actual vs. normal predicted Quantity for first 100 test records
+    - X-axis: Time index or row
+    - Y-axis: Quantity
+    - Legend: "Actual", "Predicted (Normal)"
+    - Title: Actual vs Predicted Quantity - Normal Prediction
+
+e. Export:
+- Save results to a CSV file:
+    - Columns:
+        - Start_Date, EndDate, Site_No, Item_No, Site_Name, Item_Name
+        - actual_quantity, predicted_quantity_normal
+    - Filename: xgboost_normal_predictions.csv
+- Ensure:
+    - One row per predicted date per product-site pair
+    - Sorted by Site_No, Item_No, and Date (or End_Date) if applicable
+
+f. Usage:
+- Use this to:
+    - Understand the model’s *upper-bound performance*
+    - Contrast with recursive errors to measure the *impact of prediction drift*
+
+----------------------------------------------------------------------
+IMPLEMENTATION GUIDELINES
+----------------------------------------------------------------------
+- All feature generation logic should be in *modular functions*
+- Lag/rolling must *not leak* current or future data
+- Holiday names should be *normalized across years*
+- All generated feature columns should be collected in:
+    - generated_feature_columns
+- implement number 1 - 7 in file call processing.py
+- implement number 7 in new file call train
+- implement number 8 in new file call test_recursive.py
+- implement number 9 in new file call test_regular.py
+
+----------------------------------------------------------------------
+OUTPUT
+----------------------------------------------------------------------
+- Final output should include:
+    - 1 row per (Site_No, Item_No) per 14-day interval
+    - Start_Date, End_Date, total Quantity
+    - All engineered features (aggregated accordingly)
+    - Lists:
+        - generated_feature_columns
+        - numerical_columns
+        - categorical_columns
+"""
+NOTE: PLEASE DO NOT CHANGE THE CODE IF ITS ALREADY FULL FILL REQUIREMENT. JUST ADDED THE CODE WITH NEWLY UPDATED REQUIREMENT OR CHANGES REQUIREMENT. BUT IF IT IS NECESARY FOR EXAMPLE IT COULD IMPROVE TIME COMPLEXITY OR CODE READABILITY, OR ANY OTHER MAKESENSE REASEON. YOU CAN DO IT. YOU CAN MODIFY THE CODE.
