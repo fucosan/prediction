@@ -144,75 +144,42 @@ def plot_feature_importance(model, feature_names, top_n=10):
 
 
 if __name__ == "__main__":
-    # Check if required files exist
+    # TRAINING PHASE - Only using training data
+    # =========================================
+    
+    # Check if training files exist
     if not os.path.exists('X_train.csv') or not os.path.exists('y_train.csv'):
         sys.exit("Error: Required training files 'X_train.csv' and 'y_train.csv' not found. "
                  "Run the processing script first to generate these files.")
     
-    # Check if test files exist
-    has_test_data = os.path.exists('X_test.csv') and os.path.exists('y_test.csv')
-    
     # Load training data
+    print("=== TRAINING PHASE ===")
     print("Loading training data...")
     X_train = pd.read_csv('X_train.csv')
     y_train = pd.read_csv('y_train.csv').iloc[:, 0]  # Convert to Series
     
-    # IMPORTANT: Remove any date columns that shouldn't be used for training
+    # Clean training data
     date_cols = ['Date', 'Start_Date', 'End_Date']
     for col in date_cols:
         if col in X_train.columns:
             print(f"Removing {col} column from training data")
             X_train = X_train.drop(columns=[col])
     
-    # Check for object columns that should be converted
+    # Process object columns in training data
     object_cols = X_train.select_dtypes(include=['object']).columns
     if len(object_cols) > 0:
         print(f"Converting object columns to numeric: {list(object_cols)}")
         for col in object_cols:
-            # Try to convert to numeric, if fails convert to category codes
             try:
                 X_train[col] = pd.to_numeric(X_train[col])
             except:
                 X_train[col] = X_train[col].astype('category').cat.codes
                 print(f"  - Converted {col} to category codes")
     
-    # Train model
+    # Train the model (using ONLY training data)
     model = train_xgboost_model(X_train, y_train)
     
-    # If test data available, evaluate and visualize
-    if has_test_data:
-        print("Loading test data...")
-        X_test = pd.read_csv('X_test.csv')
-        y_test = pd.read_csv('y_test.csv').iloc[:, 0]  # Convert to Series
-        
-        # IMPORTANT: Also remove date columns from test data
-        for col in date_cols:
-            if col in X_test.columns:
-                print(f"Removing {col} column from test data")
-                X_test = X_test.drop(columns=[col])
-        
-        # Check for object columns that should be converted in test data
-        object_cols_test = X_test.select_dtypes(include=['object']).columns
-        if len(object_cols_test) > 0:
-            print(f"Converting object columns in test data: {list(object_cols_test)}")
-            for col in object_cols_test:
-                # Try to convert to numeric, if fails convert to category codes
-                try:
-                    X_test[col] = pd.to_numeric(X_test[col])
-                except:
-                    X_test[col] = X_test[col].astype('category').cat.codes
-                    print(f"  - Converted {col} to category codes")
-        
-        # Evaluate
-        y_pred, rmse, mae = evaluate_model(model, X_test, y_test)
-        
-        # Visualize
-        plot_actual_vs_predicted(y_test, y_pred)
-    else:
-        print("Warning: Test files 'X_test.csv' and 'y_test.csv' not found.")
-        print("Skipping evaluation and visualization. Only model training was performed.")
-    
-    # Save the model
+    # Save the model after training is complete
     output_dir = os.path.join(os.getcwd(), 'output')
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -221,7 +188,7 @@ if __name__ == "__main__":
     model.save_model(model_path)
     print(f"Model saved to {model_path}")
     
-    # Display feature importance as text
+    # Display feature importance from training data
     feature_importance = pd.DataFrame({
         'Feature': X_train.columns,
         'Importance': model.feature_importances_
@@ -230,7 +197,46 @@ if __name__ == "__main__":
     print("\nTop 10 important features:")
     print(feature_importance.head(10))
     
-    # Visualize feature importance (NEW)
+    # Visualize feature importance
     plot_feature_importance(model, X_train.columns, top_n=10)
     
-    print("\nTraining complete!")
+    print("\nTraining phase complete!")
+    
+    # EVALUATION PHASE - Only using test data for evaluation (NOT training)
+    # ====================================================================
+    
+    # Check if test files exist
+    has_test_data = os.path.exists('X_test.csv') and os.path.exists('y_test.csv')
+    
+    if has_test_data:
+        print("\n=== EVALUATION PHASE ===")
+        print("Loading test data...")
+        X_test = pd.read_csv('X_test.csv')
+        y_test = pd.read_csv('y_test.csv').iloc[:, 0]  # Convert to Series
+        
+        # Clean test data - using same preprocessing as training data
+        for col in date_cols:
+            if col in X_test.columns:
+                print(f"Removing {col} column from test data")
+                X_test = X_test.drop(columns=[col])
+        
+        object_cols_test = X_test.select_dtypes(include=['object']).columns
+        if len(object_cols_test) > 0:
+            print(f"Converting object columns in test data: {list(object_cols_test)}")
+            for col in object_cols_test:
+                try:
+                    X_test[col] = pd.to_numeric(X_test[col])
+                except:
+                    X_test[col] = X_test[col].astype('category').cat.codes
+                    print(f"  - Converted {col} to category codes")
+        
+        # Evaluate model on test data (NO retraining or model updates here)
+        y_pred, rmse, mae = evaluate_model(model, X_test, y_test)
+        
+        # Visualize results (only using test data)
+        plot_actual_vs_predicted(y_test, y_pred)
+    else:
+        print("\nWarning: Test files 'X_test.csv' and 'y_test.csv' not found.")
+        print("Skipping evaluation phase. Only model training was performed.")
+    
+    print("\nProcess complete!")

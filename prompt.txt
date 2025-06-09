@@ -220,7 +220,7 @@ c. *Output for Training*:
 
 d. *Train / Test Split*:
 - Split the final dataset into training and test sets based on the End_Date (or Date) column:
-    - Use the *last 2 months of data as the test set*
+    - Use the *last 2 months of data as the test set* or it could be the last 2 weeks. (it can be parameterize)
     - All data before that will be used as the training set
 - This simulates realistic future prediction scenarios and avoids data leakage
 

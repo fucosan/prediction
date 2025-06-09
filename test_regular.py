@@ -145,12 +145,24 @@ def export_results(processed_df, y_test, y_pred):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    # Load the ORIGINAL test data split that contains the metadata
-    # This is needed for proper mapping
-    test_data_full = pd.read_csv('X_test_metadata.csv', parse_dates=['Start_Date', 'End_Date'])
-    
-    if 'X_test_metadata.csv' not in os.listdir():
-        print("Creating a direct mapping using available data...")
+    # Check if metadata file exists first
+    if os.path.exists('X_test_metadata.csv'):
+        print("Using X_test_metadata.csv for direct mapping...")
+        # Load the ORIGINAL test data split that contains the metadata
+        test_data_full = pd.read_csv('X_test_metadata.csv', parse_dates=['Start_Date', 'End_Date'])
+        
+        # Use the metadata file directly
+        results_df = pd.DataFrame()
+        results_df['Site_No'] = test_data_full['Site_No']
+        results_df['Item_No'] = test_data_full['Item_No']
+        results_df['Site_Name'] = test_data_full['Site_Name'] if 'Site_Name' in test_data_full.columns else 'Unknown'
+        results_df['Item_Name'] = test_data_full['Item_Name'] if 'Item_Name' in test_data_full.columns else 'Unknown'
+        results_df['Start_Date'] = test_data_full['Start_Date']
+        results_df['End_Date'] = test_data_full['End_Date']
+        results_df['actual_quantity'] = y_test.values
+        results_df['predicted_quantity_normal'] = y_pred
+    else:
+        print("Metadata file not found. Creating a direct mapping using available data...")
         # Get test data info
         X_test_info = pd.read_csv('X_test.csv')
         
@@ -163,14 +175,29 @@ def export_results(processed_df, y_test, y_pred):
         if 'Site_No' in X_test_info.columns:
             results_df['Site_No'] = X_test_info['Site_No']
         else:
-            print("Warning: Site_No not found in X_test.csv")
-            results_df['Site_No'] = "Unknown"
+            # Get test records from processed_df using indices
+            test_indices = y_test.index if hasattr(y_test, 'index') else None
+            
+            if test_indices is not None and len(processed_df) > max(test_indices):
+                # Get the metadata from processed_df using the test indices
+                test_records = processed_df.iloc[test_indices].copy()
+                results_df['Site_No'] = test_records['Site_No'].values
+            else:
+                print("Warning: Site_No not found in X_test.csv or indices")
+                results_df['Site_No'] = "Unknown"
         
         if 'Item_No' in X_test_info.columns:
             results_df['Item_No'] = X_test_info['Item_No']
         else:
-            print("Warning: Item_No not found in X_test.csv")
-            results_df['Item_No'] = "Unknown"
+            # Same approach as for Site_No
+            test_indices = y_test.index if hasattr(y_test, 'index') else None
+            
+            if test_indices is not None and len(processed_df) > max(test_indices):
+                test_records = processed_df.iloc[test_indices].copy()
+                results_df['Item_No'] = test_records['Item_No'].values
+            else:
+                print("Warning: Item_No not found in X_test.csv or indices")
+                results_df['Item_No'] = "Unknown"
         
         # Match with processed data (convert all identifiers to string to ensure matching works)
         results_df['Site_No'] = results_df['Site_No'].astype(str)
@@ -188,47 +215,13 @@ def export_results(processed_df, y_test, y_pred):
         results_df['Site_Name'] = results_df['Site_No'].map(site_names).fillna('Unknown')
         results_df['Item_Name'] = results_df['Item_No'].map(item_names).fillna('Unknown')
         
-        # Get test dates by position - this is simplistic but should work if order is preserved
-        if 'End_Date' in processed_df.columns:
-            # Get unique Site_No, Item_No pairs in results
-            unique_pairs = results_df[['Site_No', 'Item_No']].drop_duplicates()
-            
-            # Get the most recent dates for each Site_No, Item_No pair
-            date_data = []
-            for _, row in unique_pairs.iterrows():
-                site = row['Site_No']
-                item = row['Item_No']
-                matching_rows = processed_df[(processed_df['Site_No'] == site) & 
-                                          (processed_df['Item_No'] == item)]
-                
-                if not matching_rows.empty:
-                    # Get the latest dates
-                    latest = matching_rows.sort_values('End_Date', ascending=False).iloc[0]
-                    date_data.append({
-                        'Site_No': site,
-                        'Item_No': item,
-                        'Start_Date': latest['Start_Date'],
-                        'End_Date': latest['End_Date']
-                    })
-            
-            # Create a dates dataframe
-            if date_data:
-                dates_df = pd.DataFrame(date_data)
-                
-                # Merge dates into results
-                results_df = results_df.merge(dates_df, on=['Site_No', 'Item_No'], how='left')
-    else:
-        print("Using X_test_metadata.csv for direct mapping...")
-        # Use the metadata file directly
-        results_df = pd.DataFrame()
-        results_df['Site_No'] = test_data_full['Site_No']
-        results_df['Item_No'] = test_data_full['Item_No']
-        results_df['Site_Name'] = test_data_full['Site_Name'] if 'Site_Name' in test_data_full else 'Unknown'
-        results_df['Item_Name'] = test_data_full['Item_Name'] if 'Item_Name' in test_data_full else 'Unknown'
-        results_df['Start_Date'] = test_data_full['Start_Date']
-        results_df['End_Date'] = test_data_full['End_Date']
-        results_df['actual_quantity'] = y_test.values
-        results_df['predicted_quantity_normal'] = y_pred
+        # Get test dates by accessing processed_df using test indices
+        test_indices = y_test.index if hasattr(y_test, 'index') else None
+        
+        if test_indices is not None and 'Start_Date' in processed_df.columns and 'End_Date' in processed_df.columns:
+            test_records = processed_df.iloc[test_indices].copy()
+            results_df['Start_Date'] = test_records['Start_Date'].values
+            results_df['End_Date'] = test_records['End_Date'].values
     
     # Sort by Site_No, Item_No, and date if available
     sort_cols = ['Site_No', 'Item_No']

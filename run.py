@@ -43,12 +43,13 @@ if prepare_model:
         encoding_type='label'  # Options: 'label' or 'onehot'
     )
     
-    # Create time-based train/test split using fixed month windows
-    # The last 2 months will be used as test set as specified in the requirements
+    # Create time-based train/test split using fixed time windows
+    # The last 2 weeks will be used as test set
     X_train, X_valid, X_test, y_train, y_valid, y_test = split_time_series_data(
         processed_df, X, y, 
-        test_months=2,  # Use last 2 months as test set
-        valid_months=1  # Optional: Use 1 month before test set as validation
+        test_periods=2,  # Use last 2 periods (weeks) as test set
+        valid_periods=1,  # Use 1 period (week) before test set as validation
+        split_unit='weeks'  # Use weeks as the time unit
     )
     
     # Save test set metadata to CSV - use the indices from y_test to get metadata
@@ -63,9 +64,6 @@ if prepare_model:
     X_test_metadata['Start_Date'] = processed_df.loc[test_indices, 'Start_Date'].values
     X_test_metadata['End_Date'] = processed_df.loc[test_indices, 'End_Date'].values
     X_test_metadata.to_csv('X_test_metadata.csv', index=False)
-    
-    print("\nModel data preparation complete.")
-    print(f"X shape: {X.shape}, contains features: {X.columns.tolist()[:5]}...")
     
     # Example of saving train/test data for modeling
     X_train.to_csv('X_train.csv', index=False)

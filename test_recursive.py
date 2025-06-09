@@ -350,39 +350,57 @@ def export_results(processed_df, y_test, y_pred_recursive):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    # Get test records
-    test_indices = y_test.index
-    test_records = processed_df.loc[test_indices].copy()
-    
-    # Create final results dataframe
-    results_df = pd.DataFrame()
-    
-    # Add required columns
-    results_df['Site_No'] = test_records['Site_No']
-    results_df['Item_No'] = test_records['Item_No']
-    
-    # Add Site_Name and Item_Name if available
-    if 'Site_Name' in test_records.columns:
-        results_df['Site_Name'] = test_records['Site_Name']
-    else:
-        results_df['Site_Name'] = 'Unknown'
+    # Check if metadata file exists first
+    if os.path.exists('X_test_metadata.csv'):
+        print("Using X_test_metadata.csv for direct mapping...")
+        # Load the ORIGINAL test data split that contains the metadata
+        test_data_full = pd.read_csv('X_test_metadata.csv', parse_dates=['Start_Date', 'End_Date'])
         
-    if 'Item_Name' in test_records.columns:
-        results_df['Item_Name'] = test_records['Item_Name']
+        # Use the metadata file directly
+        results_df = pd.DataFrame()
+        results_df['Site_No'] = test_data_full['Site_No']
+        results_df['Item_No'] = test_data_full['Item_No']
+        results_df['Site_Name'] = test_data_full['Site_Name'] if 'Site_Name' in test_data_full.columns else 'Unknown'
+        results_df['Item_Name'] = test_data_full['Item_Name'] if 'Item_Name' in test_data_full.columns else 'Unknown'
+        results_df['Start_Date'] = test_data_full['Start_Date']
+        results_df['End_Date'] = test_data_full['End_Date']
+        results_df['actual_quantity'] = y_test.values
+        results_df['predicted_quantity_recursive'] = y_pred_recursive.values
     else:
-        results_df['Item_Name'] = 'Unknown'
+        print("Metadata file not found. Using indices from test set...")
+        # Get test records from processed_df
+        test_indices = y_test.index
+        test_records = processed_df.loc[test_indices].copy()
+        
+        # Create final results dataframe
+        results_df = pd.DataFrame()
+        
+        # Add required columns
+        results_df['Site_No'] = test_records['Site_No']
+        results_df['Item_No'] = test_records['Item_No']
+        
+        # Add Site_Name and Item_Name if available
+        if 'Site_Name' in test_records.columns:
+            results_df['Site_Name'] = test_records['Site_Name']
+        else:
+            results_df['Site_Name'] = 'Unknown'
+            
+        if 'Item_Name' in test_records.columns:
+            results_df['Item_Name'] = test_records['Item_Name']
+        else:
+            results_df['Item_Name'] = 'Unknown'
+        
+        # Add date information - ensure they're properly formatted
+        if 'End_Date' in test_records.columns:
+            results_df['End_Date'] = pd.to_datetime(test_records['End_Date']).dt.strftime('%Y-%m-%d')
+        if 'Start_Date' in test_records.columns:
+            results_df['Start_Date'] = pd.to_datetime(test_records['Start_Date']).dt.strftime('%Y-%m-%d')
+        
+        # Add actual and predicted quantities
+        results_df['actual_quantity'] = y_test.values
+        results_df['predicted_quantity_recursive'] = y_pred_recursive.values
     
-    # Add date information - ensure they're properly formatted
-    if 'End_Date' in test_records.columns:
-        results_df['End_Date'] = pd.to_datetime(test_records['End_Date']).dt.strftime('%Y-%m-%d')
-    if 'Start_Date' in test_records.columns:
-        results_df['Start_Date'] = pd.to_datetime(test_records['Start_Date']).dt.strftime('%Y-%m-%d')
-    
-    # Add actual and predicted quantities
-    results_df['actual_quantity'] = y_test.values
-    results_df['predicted_quantity'] = y_pred_recursive.values
-    
-    # Sort by Site_No, Item_No, and date
+    # Sort by Site_No, Item_No, and date if available
     sort_cols = ['Site_No', 'Item_No']
     if 'End_Date' in results_df.columns:
         sort_cols.append('End_Date')

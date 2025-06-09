@@ -593,8 +593,8 @@ def prepare_for_training(df: pd.DataFrame, numerical_cols: List[str], categorica
 
 
 def split_time_series_data(df: pd.DataFrame, X: pd.DataFrame, y: pd.Series, 
-                           test_months: int = 2, valid_months: Optional[int] = None,
-                           date_col: str = 'End_Date') -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, 
+                           test_periods: int = 2, valid_periods: Optional[int] = None,
+                           split_unit: str = 'months', date_col: str = 'End_Date') -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, 
                                                                pd.Series, pd.Series, pd.Series]:
     """
     Split time series data into training, validation, and test sets.
@@ -604,9 +604,10 @@ def split_time_series_data(df: pd.DataFrame, X: pd.DataFrame, y: pd.Series,
         df: Original dataframe with date column
         X: Feature matrix
         y: Target variable
-        test_months: Number of months at the end to use as test set (default: 2)
-        valid_months: Number of months before test set to use as validation set (default: None)
+        test_periods: Number of periods at the end to use as test set (default: 2)
+        valid_periods: Number of periods before test set to use as validation set (default: None)
                       If None, no validation set is created (only train and test)
+        split_unit: Unit for time periods, either 'months' or 'weeks' (default: 'months')
         date_col: Name of date column to use for splitting
         
     Returns:
@@ -624,12 +625,25 @@ def split_time_series_data(df: pd.DataFrame, X: pd.DataFrame, y: pd.Series,
     # Get the last date in the dataset
     last_date = df[date_col].max()
     
-    # Calculate the test cutoff date (last date minus test_months)
-    test_cutoff_date = last_date - relativedelta(months=test_months)
+    # Validate split_unit parameter
+    if split_unit not in ['months', 'weeks']:
+        raise ValueError("split_unit must be either 'months' or 'weeks'")
+    
+    # Calculate the test cutoff date based on the specified unit
+    if split_unit == 'months':
+        test_cutoff_date = last_date - relativedelta(months=test_periods)
+        unit_name = 'months'
+    else:  # weeks
+        test_cutoff_date = last_date - relativedelta(weeks=test_periods)
+        unit_name = 'weeks'
     
     # Calculate the validation cutoff date if requested
-    if valid_months is not None:
-        valid_cutoff_date = test_cutoff_date - relativedelta(months=valid_months)
+    if valid_periods is not None:
+        if split_unit == 'months':
+            valid_cutoff_date = test_cutoff_date - relativedelta(months=valid_periods)
+        else:  # weeks
+            valid_cutoff_date = test_cutoff_date - relativedelta(weeks=valid_periods)
+            
         # Create masks for each split
         train_mask = df[date_col] < valid_cutoff_date
         valid_mask = (df[date_col] >= valid_cutoff_date) & (df[date_col] < test_cutoff_date)
@@ -647,7 +661,7 @@ def split_time_series_data(df: pd.DataFrame, X: pd.DataFrame, y: pd.Series,
         # Print information about the split
         print(f"Training set: {len(X_train)} samples (data before {valid_cutoff_date.date()})")
         print(f"Validation set: {len(X_valid)} samples (data from {valid_cutoff_date.date()} to {test_cutoff_date.date()})")
-        print(f"Test set: {len(X_test)} samples (last {test_months} months, from {test_cutoff_date.date()} to {last_date.date()})")
+        print(f"Test set: {len(X_test)} samples (last {test_periods} {unit_name}, from {test_cutoff_date.date()} to {last_date.date()})")
     
     else:
         # No validation set, only train and test
@@ -665,7 +679,7 @@ def split_time_series_data(df: pd.DataFrame, X: pd.DataFrame, y: pd.Series,
         
         # Print information about the split
         print(f"Training set: {len(X_train)} samples (data before {test_cutoff_date.date()})")
-        print(f"Test set: {len(X_test)} samples (last {test_months} months, from {test_cutoff_date.date()} to {last_date.date()})")
+        print(f"Test set: {len(X_test)} samples (last {test_periods} {unit_name}, from {test_cutoff_date.date()} to {last_date.date()})")
     
     return X_train, X_valid, X_test, y_train, y_valid, y_test
 
