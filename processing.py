@@ -594,11 +594,12 @@ def prepare_for_training(df: pd.DataFrame, numerical_cols: List[str], categorica
 
 def split_time_series_data(df: pd.DataFrame, X: pd.DataFrame, y: pd.Series, 
                            test_periods: int = 2, valid_periods: Optional[int] = None,
-                           split_unit: str = 'months', date_col: str = 'End_Date') -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, 
+                           split_unit: str = 'months', date_col: str = 'End_Date',
+                           test_years: Optional[List[int]] = None) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, 
                                                                pd.Series, pd.Series, pd.Series]:
     """
     Split time series data into training, validation, and test sets.
-    Uses fixed time windows rather than proportions to prevent data leakage.
+    Uses fixed time windows or specific years to prevent data leakage.
     
     Args:
         df: Original dataframe with date column
@@ -607,8 +608,10 @@ def split_time_series_data(df: pd.DataFrame, X: pd.DataFrame, y: pd.Series,
         test_periods: Number of periods at the end to use as test set (default: 2)
         valid_periods: Number of periods before test set to use as validation set (default: None)
                       If None, no validation set is created (only train and test)
-        split_unit: Unit for time periods, either 'months' or 'weeks' (default: 'months')
+        split_unit: Unit for time periods, either 'months', 'weeks', or 'years' (default: 'months')
         date_col: Name of date column to use for splitting
+        test_years: List of years to use as test set (e.g., [2024, 2025]). 
+                   If provided, this overrides test_periods and split_unit
         
     Returns:
         Tuple of (X_train, X_valid, X_test, y_train, y_valid, y_test)
@@ -622,27 +625,83 @@ def split_time_series_data(df: pd.DataFrame, X: pd.DataFrame, y: pd.Series,
         df = df.copy()
         df[date_col] = pd.to_datetime(df[date_col])
     
+    # Handle year-based splitting
+    if test_years is not None:
+        if not isinstance(test_years, list):
+            test_years = [test_years]
+        
+        # Create masks for year-based splitting
+        test_mask = df[date_col].dt.year.isin(test_years)
+        
+        # If validation periods are specified, use the year before the first test year
+        if valid_periods is not None:
+            min_test_year = min(test_years)
+            valid_years = [min_test_year - i for i in range(1, valid_periods + 1)]
+            valid_mask = df[date_col].dt.year.isin(valid_years)
+            train_mask = ~(test_mask | valid_mask)
+            
+            # Split based on masks
+            X_train = X.loc[df[train_mask].index]
+            X_valid = X.loc[df[valid_mask].index]
+            X_test = X.loc[df[test_mask].index]
+            
+            y_train = y.loc[df[train_mask].index]
+            y_valid = y.loc[df[valid_mask].index]
+            y_test = y.loc[df[test_mask].index]
+            
+            # Print information about the split
+            train_years = sorted(df.loc[train_mask, date_col].dt.year.unique())
+            print(f"Training set: {len(X_train)} samples (years: {train_years})")
+            print(f"Validation set: {len(X_valid)} samples (years: {valid_years})")
+            print(f"Test set: {len(X_test)} samples (years: {test_years})")
+        
+        else:
+            # No validation set, only train and test
+            train_mask = ~test_mask
+            
+            # Split based on masks
+            X_train = X.loc[df[train_mask].index]
+            X_valid = pd.DataFrame()  # Empty DataFrame
+            X_test = X.loc[df[test_mask].index]
+            
+            y_train = y.loc[df[train_mask].index]
+            y_valid = pd.Series()  # Empty Series
+            y_test = y.loc[df[test_mask].index]
+            
+            # Print information about the split
+            train_years = sorted(df.loc[train_mask, date_col].dt.year.unique())
+            print(f"Training set: {len(X_train)} samples (years: {train_years})")
+            print(f"Test set: {len(X_test)} samples (years: {test_years})")
+        
+        return X_train, X_valid, X_test, y_train, y_valid, y_test
+    
+    # Original time-based splitting logic
     # Get the last date in the dataset
     last_date = df[date_col].max()
     
     # Validate split_unit parameter
-    if split_unit not in ['months', 'weeks']:
-        raise ValueError("split_unit must be either 'months' or 'weeks'")
+    if split_unit not in ['months', 'weeks', 'years']:
+        raise ValueError("split_unit must be either 'months', 'weeks', or 'years'")
     
     # Calculate the test cutoff date based on the specified unit
     if split_unit == 'months':
         test_cutoff_date = last_date - relativedelta(months=test_periods)
         unit_name = 'months'
-    else:  # weeks
+    elif split_unit == 'weeks':
         test_cutoff_date = last_date - relativedelta(weeks=test_periods)
         unit_name = 'weeks'
+    else:  # years
+        test_cutoff_date = last_date - relativedelta(years=test_periods)
+        unit_name = 'years'
     
     # Calculate the validation cutoff date if requested
     if valid_periods is not None:
         if split_unit == 'months':
             valid_cutoff_date = test_cutoff_date - relativedelta(months=valid_periods)
-        else:  # weeks
+        elif split_unit == 'weeks':
             valid_cutoff_date = test_cutoff_date - relativedelta(weeks=valid_periods)
+        else:  # years
+            valid_cutoff_date = test_cutoff_date - relativedelta(years=valid_periods)
             
         # Create masks for each split
         train_mask = df[date_col] < valid_cutoff_date

@@ -43,13 +43,11 @@ if prepare_model:
         encoding_type='label'  # Options: 'label' or 'onehot'
     )
     
-    # Create time-based train/test split using fixed time windows
-    # The last 2 weeks will be used as test set
+    # Single year as test set
+    print("\n=== Single Year Test Split ===")
     X_train, X_valid, X_test, y_train, y_valid, y_test = split_time_series_data(
-        processed_df, X, y, 
-        test_periods=2,  # Use last 2 periods (weeks) as test set
-        valid_periods=1,  # Use 1 period (week) before test set as validation
-        split_unit='weeks'  # Use weeks as the time unit
+        processed_df, X, y,
+        test_years=[2025]  # Use only 2025 as test year
     )
     
     # Save test set metadata to CSV - use the indices from y_test to get metadata

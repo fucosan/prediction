@@ -55,6 +55,33 @@ def evaluate_model(model, X_test, y_test):
     print(f"  - RMSE: {rmse:.4f}")
     print(f"  - MAE: {mae:.4f}")
     
+    # Save metrics to file
+    output_dir = os.path.join(os.getcwd(), 'output')
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    metrics_path = os.path.join(output_dir, 'model_metrics.txt')
+    with open(metrics_path, 'w') as f:
+        f.write("XGBoost Model Evaluation Metrics\n")
+        f.write("=" * 35 + "\n")
+        f.write(f"Root Mean Squared Error (RMSE): {rmse:.4f}\n")
+        f.write(f"Mean Absolute Error (MAE): {mae:.4f}\n")
+        f.write("\n")
+        f.write(f"Test samples: {len(y_test)}\n")
+        f.write(f"Predictions range: [{y_pred.min():.4f}, {y_pred.max():.4f}]\n")
+        f.write(f"Actual values range: [{y_test.min():.4f}, {y_test.max():.4f}]\n")
+    
+    print(f"Metrics saved to {metrics_path}")
+    
+    # Also save as CSV for easy data analysis
+    metrics_df = pd.DataFrame({
+        'Metric': ['RMSE', 'MAE'],
+        'Value': [rmse, mae]
+    })
+    metrics_csv_path = os.path.join(output_dir, 'model_metrics.csv')
+    metrics_df.to_csv(metrics_csv_path, index=False)
+    print(f"Metrics CSV saved to {metrics_csv_path}")
+    
     return y_pred, rmse, mae
 
 
@@ -232,6 +259,27 @@ if __name__ == "__main__":
         
         # Evaluate model on test data (NO retraining or model updates here)
         y_pred, rmse, mae = evaluate_model(model, X_test, y_test)
+        
+        # Save detailed results summary
+        output_dir = os.path.join(os.getcwd(), 'output')
+        summary_path = os.path.join(output_dir, 'evaluation_summary.txt')
+        with open(summary_path, 'w') as f:
+            f.write("XGBoost Sales Prediction Model - Evaluation Summary\n")
+            f.write("=" * 55 + "\n\n")
+            f.write("Training Configuration:\n")
+            f.write(f"  - Training samples: {len(X_train)}\n")
+            f.write(f"  - Features: {len(X_train.columns)}\n")
+            f.write(f"  - Test samples: {len(X_test)}\n\n")
+            f.write("Performance Metrics:\n")
+            f.write(f"  - Root Mean Squared Error (RMSE): {rmse:.4f}\n")
+            f.write(f"  - Mean Absolute Error (MAE): {mae:.4f}\n\n")
+            f.write("Data Statistics:\n")
+            f.write(f"  - Actual values range: [{y_test.min():.4f}, {y_test.max():.4f}]\n")
+            f.write(f"  - Predicted values range: [{y_pred.min():.4f}, {y_pred.max():.4f}]\n")
+            f.write(f"  - Actual mean: {y_test.mean():.4f}\n")
+            f.write(f"  - Predicted mean: {y_pred.mean():.4f}\n")
+        
+        print(f"Evaluation summary saved to {summary_path}")
         
         # Visualize results (only using test data)
         plot_actual_vs_predicted(y_test, y_pred)
