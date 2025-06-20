@@ -170,6 +170,23 @@ def plot_feature_importance(model, feature_names, top_n=10):
     plt.close()
 
 
+def is_nonempty_csv(path):
+    """
+    Check if a CSV file is non-empty (has at least one row of data).
+    
+    Args:
+        path: Path to the CSV file
+    
+    Returns:
+        bool: True if the CSV is non-empty, False otherwise
+    """
+    try:
+        df = pd.read_csv(path, nrows=1)
+        return not df.empty or len(df.columns) > 0
+    except pd.errors.EmptyDataError:
+        return False
+
+
 if __name__ == "__main__":
     # TRAINING PHASE - Only using training data
     # =========================================
@@ -211,9 +228,8 @@ if __name__ == "__main__":
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    model_path = os.path.join(output_dir, 'xgboost_sales_model.json')
-    model.save_model(model_path)
-    print(f"Model saved to {model_path}")
+    model.save_model('xgboost_sales_model.json')
+    print("Model saved to xgboost_sales_model.json")
     
     # Display feature importance from training data
     feature_importance = pd.DataFrame({
@@ -235,7 +251,7 @@ if __name__ == "__main__":
     # Check if test files exist
     has_test_data = os.path.exists('X_test.csv') and os.path.exists('y_test.csv')
     
-    if has_test_data:
+    if has_test_data and is_nonempty_csv('X_test.csv') and is_nonempty_csv('y_test.csv'):
         print("\n=== EVALUATION PHASE ===")
         print("Loading test data...")
         X_test = pd.read_csv('X_test.csv')
@@ -284,7 +300,7 @@ if __name__ == "__main__":
         # Visualize results (only using test data)
         plot_actual_vs_predicted(y_test, y_pred)
     else:
-        print("\nWarning: Test files 'X_test.csv' and 'y_test.csv' not found.")
+        print("\nWarning: Test files 'X_test.csv' and/or 'y_test.csv' are missing or empty.")
         print("Skipping evaluation phase. Only model training was performed.")
     
     print("\nProcess complete!")

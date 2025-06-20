@@ -300,9 +300,7 @@ def add_holiday_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
 
 def clean_initial_dataset(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Perform initial cleaning operations on the dataset:
-    1. Drop specified columns if they exist
-    2. Convert percentage columns from strings (e.g., '3%') to float values (e.g., 0.03)
+    Keep only the specified columns and convert percentage columns from strings (e.g., '3%') to float values (e.g., 0.03).
     
     Args:
         df: Raw DataFrame with sales data
@@ -312,22 +310,35 @@ def clean_initial_dataset(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     
-    # Drop specified columns if they exist
-    drop_cols = [
-        'Total_Sales_Incl_PPN_IDR',
-        'Selling_Price_Incl_PPN_IDR',
-        'Periodic_Disc_Amount_incl_PPN_IDR',
+    # List of columns to keep (the common columns)
+    keep_cols = [
         'Add_Periodic_Disc_Amount_IDR',
         'Amount_Discount_Tambahan_incl_PPN_IDR',
-        'Vendor_No', 'Master_Brand_Name', 'Unit_of_Measure',
-        'item_mitra_10', 'kode_item_m10', 'kode_item_m10(cons)',
-        'item_mitra_10(cons)', 'kode_item_onda', 'mapping_nama_item_onda',
-        'produksi', 'benchmark_new_item', 'dus', 'category'
+         # 'Brand_Name',
+        'Category_Name',
+        'Date',
+        'Discount_Tambahan_Percentage',
+         # 'Item_Name',
+        'Item_No',
+        'Line_Disc_Amount_Approval_IDR',
+         # 'Master_Brand_Name',
+        'Periodic_Disc_Amount_incl_PPN_IDR',
+        'Periodic_Disc_CC_Percentage',
+        'Periodic_Disc_Percentage',
+        'Quantity',
+        'Selling_Price_Incl_PPN_IDR',
+         # 'Site_Name',
+        'Site_No',
+        'Sub_Category_Name',
+        'Total_Sales_Incl_PPN_IDR',
+        'Unit_of_Measure',
+         # 'Vendor_Name',
+        'Vendor_No'
     ]
     
-    existing_cols = [col for col in drop_cols if col in df.columns]
-    if existing_cols:
-        df = df.drop(columns=existing_cols)
+    # Keep only the specified columns that exist in the DataFrame
+    existing_cols = [col for col in keep_cols if col in df.columns]
+    df = df[existing_cols]
     
     # Convert percentage columns to proper float values
     pct_columns = [
@@ -342,7 +353,6 @@ def clean_initial_dataset(df: pd.DataFrame) -> pd.DataFrame:
             if df[col].dtype == 'object':
                 df[col] = df[col].replace('', '0%')  # Handle empty strings
                 df[col] = df[col].str.rstrip('%').astype(float) / 100
-            # Handle raw numeric values
             else:
                 df[col] = df[col] / 100
     
@@ -381,29 +391,22 @@ def add_calendar_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
 
 def classify_data_types(df: pd.DataFrame) -> Tuple[List[str], List[str]]:
     """
-    Separate DataFrame columns into numerical and categorical types.
-    
-    Args:
-        df: DataFrame to classify
-        
-    Returns:
-        Tuple of (numerical_columns, categorical_columns)
+    Classify columns into numerical and categorical types.
     """
-    # Date fields to exclude from both numerical and categorical columns
+    # Find numeric columns (float and int), exclude dates and IDs
+    numeric_cols = []
     date_fields = ['Date', 'Start_Date', 'End_Date']
     
-    # Basic datatypes that are always numeric
-    numeric_dtypes = ['int16', 'int32', 'int64', 'float16', 'float32', 'float64']
+    for col in df.columns:
+        if col not in date_fields and col not in ['Site_No', 'Item_No', 'Vendor_No']:
+            try:
+                # Check if column can be converted to float
+                pd.to_numeric(df[col]).dtype
+                numeric_cols.append(col)
+            except:
+                pass
     
-    # Get columns with numeric datatypes
-    numeric_cols = list(df.select_dtypes(include=numeric_dtypes).columns)
-    
-    # Remove Site_No and Item_No from numeric columns if they are there
-    # This ensures they're treated as categorical even if they contain only numbers
-    if 'Site_No' in numeric_cols:
-        numeric_cols.remove('Site_No')
-    if 'Item_No' in numeric_cols:
-        numeric_cols.remove('Item_No')
+    # Correct vendor_no if mistakenly classified as numeric
     if 'Vendor_No' in numeric_cols:
         numeric_cols.remove('Vendor_No')
     
@@ -411,20 +414,28 @@ def classify_data_types(df: pd.DataFrame) -> Tuple[List[str], List[str]]:
     for col in df.columns:
         if col not in numeric_cols and col not in ['Site_No', 'Item_No', 'Vendor_No'] and (
             col.startswith(('lag_', 'rolling_', 'days_since_', 'DaysTo', 'DaysSince')) or
-            col in ['Quantity', 'Month', 'Week', 'Year', 'isPromo']
+            col == 'Quantity'  # FIXED: Removed Month, Week, Year, isPromo
         ):
             numeric_cols.append(col)
     
     # All other columns are categorical, explicitly including Site_No and Item_No
     categorical_cols = [col for col in df.columns if col not in numeric_cols]
     
+    # Explicitly add time-based features as categorical
+    time_categoricals = ['Month', 'Week', 'Year', 'isPromo', 'IsHoliday', 'IsPaydayWindow']
+    for col in time_categoricals:
+        if col in df.columns:
+            if col in numeric_cols:
+                numeric_cols.remove(col)
+            if col not in categorical_cols:
+                categorical_cols.append(col)
+    
     # Make absolutely sure identifier columns are in categorical columns
     for id_col in ['Site_No', 'Item_No', 'Vendor_No']:
         if id_col in df.columns and id_col not in categorical_cols:
             categorical_cols.append(id_col)
     
-    # Explicitly exclude date fields from both lists as they should be used only for
-    # filtering, grouping, and feature generation, not as direct model inputs
+    # Explicitly exclude date fields from both lists
     for date_field in date_fields:
         if date_field in numeric_cols:
             numeric_cols.remove(date_field)
@@ -510,37 +521,26 @@ def aggregate_biweekly(df: pd.DataFrame, period_days: int = 14) -> pd.DataFrame:
 
 
 
-def prepare_for_training(df: pd.DataFrame, numerical_cols: List[str], categorical_cols: List[str], 
-                         target_col: str = 'Quantity', scaler_type: str = 'robust',
-                         encoding_type: str = 'onehot', model_type: str = 'linear') -> Tuple[pd.DataFrame, pd.Series]:
+def prepare_for_training(
+    df: pd.DataFrame, 
+    numerical_cols: List[str], 
+    categorical_cols: List[str], 
+    target_col: str = 'Quantity', 
+    scaler_type: str = 'robust',
+    encoding_type: str = 'onehot', 
+    model_type: str = 'linear'
+) -> Tuple[pd.DataFrame, pd.Series, object, object]:
     """
-    Prepare the processed dataset for model training:
-    1. Normalize numerical features (except target_col)
-    2. Encode categorical features (except Site_No and Item_No)
-    3. Create feature matrix X and target variable y
-    
-    Args:
-        df: Processed dataframe with all features
-        numerical_cols: List of numerical columns
-        categorical_cols: List of categorical columns
-        target_col: Target column name (default: 'Quantity')
-        scaler_type: Type of scaler to use ('minmax', 'standard', 'robust')
-        encoding_type: Type of categorical encoding ('onehot', 'label')
-        model_type: Type of model to prepare for ('linear', 'tree')
-        
-    Returns:
-        Tuple of (Feature matrix X, Target variable y)
+    Prepare the processed dataset for model training
     """
     df = df.copy()
     
-    # Separate target variable
-    y = df[target_col].copy()
-    
+    # Initialize scaler and encoder
+    scaler = None
+    encoder = None
+
     # 1. Normalize numerical features (except target)
-    # Remove target_col from normalization if it's in numerical_cols
     numerical_for_scaling = [col for col in numerical_cols if col != target_col]
-    
-    # Choose scaler based on parameter
     if scaler_type == 'minmax':
         scaler = MinMaxScaler()
     elif scaler_type == 'standard':
@@ -549,73 +549,54 @@ def prepare_for_training(df: pd.DataFrame, numerical_cols: List[str], categorica
         scaler = RobustScaler()
     else:
         raise ValueError(f"Unknown scaler type: {scaler_type}. Use 'minmax', 'standard', or 'robust'.")
-    
-    # Scale numerical features if there are any
     if numerical_for_scaling:
         df[numerical_for_scaling] = scaler.fit_transform(df[numerical_for_scaling])
-    
-    # 2. Encode categorical features (except Site_No and Item_No)
-    # Remove identifiers from encoding
-    cat_for_encoding = [col for col in categorical_cols if col not in ['Site_No', 'Item_No']]
-    
-    # Process categorical variables based on model type and encoding preference
+
+    # 2. Encode categorical features (including Site_No and Item_No)
     if encoding_type == 'onehot' or model_type == 'linear':
-        # One-hot encoding for categorical variables (preferable for linear models)
-        encoded_df = pd.get_dummies(df[cat_for_encoding], drop_first=True)
-        
-        # Drop original categorical columns and add encoded ones
-        df = df.drop(columns=cat_for_encoding)
-        df = pd.concat([df, encoded_df], axis=1)
-        
+        encoder = OneHotEncoder(drop='first', sparse=False, handle_unknown='ignore')
+        if categorical_cols:
+            encoded = encoder.fit_transform(df[categorical_cols])
+            encoded_df = pd.DataFrame(encoded, columns=encoder.get_feature_names_out(categorical_cols), index=df.index)
+            df = df.drop(columns=categorical_cols)
+            df = pd.concat([df, encoded_df], axis=1)
     elif encoding_type == 'label' or model_type == 'tree':
-        # Label encoding for categorical variables (suitable for tree-based models)
-        for col in cat_for_encoding:
-            if df[col].dtype == 'object' or df[col].dtype == 'category':
-                label_encoder = LabelEncoder()
-                df[col] = label_encoder.fit_transform(df[col])
+        encoder = {}
+        for col in categorical_cols:
+            le = LabelEncoder()
+            df[col] = le.fit_transform(df[col].astype(str))
+            encoder[col] = le
+
+    # 3. Create X and y, but keep Site_No and Item_No as features
+    X = df.drop(columns=[target_col], errors='ignore')
     
-    # 3. Remove Site_No and Item_No from features
-    X = df.drop(columns=['Site_No', 'Item_No', target_col], errors='ignore')
-    
-    # Check for any remaining NaNs and fill them
+    # Handle any remaining object/category columns
     if X.isna().any().any():
-        print(f"Warning: NaN values found in {X.columns[X.isna().any()].tolist()}. Filling with zeros.")
         X = X.fillna(0)
-    
-    # Final check - remove any remaining categorical columns that might not be encoded
     object_cols = X.select_dtypes(include=['object', 'category']).columns
     if len(object_cols) > 0:
-        print(f"Warning: Non-encoded object columns found: {object_cols.tolist()}. Converting to category codes.")
         for col in object_cols:
             X[col] = X[col].astype('category').cat.codes
-    
-    return X, y
+
+    y = df[target_col].copy()
+    return X, y, scaler, encoder
 
 
-def split_time_series_data(df: pd.DataFrame, X: pd.DataFrame, y: pd.Series, 
-                           test_periods: int = 2, valid_periods: Optional[int] = None,
-                           split_unit: str = 'months', date_col: str = 'End_Date',
-                           test_years: Optional[List[int]] = None) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, 
-                                                               pd.Series, pd.Series, pd.Series]:
+def split_time_series_data(
+    df: pd.DataFrame, X: pd.DataFrame, y: pd.Series, 
+    test_periods: int = 2, valid_periods: Optional[int] = None,
+    split_unit: str = 'months', date_col: str = 'End_Date',
+    test_years: Optional[List[int]] = None,
+    use_all_for_train: bool = False  # <-- Add this parameter
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series]:
     """
     Split time series data into training, validation, and test sets.
-    Uses fixed time windows or specific years to prevent data leakage.
-    
-    Args:
-        df: Original dataframe with date column
-        X: Feature matrix
-        y: Target variable
-        test_periods: Number of periods at the end to use as test set (default: 2)
-        valid_periods: Number of periods before test set to use as validation set (default: None)
-                      If None, no validation set is created (only train and test)
-        split_unit: Unit for time periods, either 'months', 'weeks', or 'years' (default: 'months')
-        date_col: Name of date column to use for splitting
-        test_years: List of years to use as test set (e.g., [2024, 2025]). 
-                   If provided, this overrides test_periods and split_unit
-        
-    Returns:
-        Tuple of (X_train, X_valid, X_test, y_train, y_valid, y_test)
+    If use_all_for_train is True, returns all data as training set.
     """
+    if use_all_for_train:
+        print("Using all data for training (no test/validation split).")
+        return X, pd.DataFrame(), pd.DataFrame(), y, pd.Series(), pd.Series()
+    
     # Ensure the date column exists
     if date_col not in df.columns:
         raise ValueError(f"Date column '{date_col}' not found in dataframe")
@@ -743,18 +724,22 @@ def split_time_series_data(df: pd.DataFrame, X: pd.DataFrame, y: pd.Series,
     return X_train, X_valid, X_test, y_train, y_valid, y_test
 
 
-def process_sales_data(df: pd.DataFrame, 
-                       lag_periods: List[int] = [1, 2, 3, 7, 14],
-                       window_sizes: List[int] = [3, 7, 14, 28],
-                       rolling_metrics: List[str] = ['mean', 'sum', 'std'],
-                       prepare_model_data: bool = False,
-                       target_col: str = 'Quantity',
-                       scaler_type: str = 'robust',
-                       encoding_type: str = 'onehot',
-                       model_type: str = 'linear') -> Union[
-                           Tuple[pd.DataFrame, List[str], List[str], List[str]],
-                           Tuple[pd.DataFrame, List[str], List[str], List[str], pd.DataFrame, pd.Series]
-                       ]:
+def process_sales_data(
+    df: pd.DataFrame, 
+    lag_periods: List[int] = [1, 2, 3, 7, 14],
+    window_sizes: List[int] = [3, 7, 14, 28],
+    rolling_metrics: List[str] = ['mean', 'sum', 'std'],
+    prepare_model_data: bool = False,
+    target_col: str = 'Quantity',
+    scaler_type: str = 'robust',
+    encoding_type: str = 'onehot',
+    model_type: str = 'linear',
+    return_scaler_encoder: bool = False  # <-- Add this
+) -> Union[
+    Tuple[pd.DataFrame, List[str], List[str], List[str]],
+    Tuple[pd.DataFrame, List[str], List[str], List[str], pd.DataFrame, pd.Series],
+    Tuple[pd.DataFrame, List[str], List[str], List[str], pd.DataFrame, pd.Series, object, object]  # for scaler, encoder
+]:
     """
     Main processing function that orchestrates the full workflow:
     1. Initial cleaning
@@ -832,7 +817,7 @@ def process_sales_data(df: pd.DataFrame,
     
     # Step 11: Optionally prepare for modeling
     if prepare_model_data:
-        X, y = prepare_for_training(
+        X, y, scaler, encoder = prepare_for_training(
             df_aggregated,
             numerical_columns,
             categorical_columns,
@@ -841,8 +826,10 @@ def process_sales_data(df: pd.DataFrame,
             encoding_type=encoding_type,
             model_type=model_type
         )
-        return df_aggregated, generated_feature_columns, numerical_columns, categorical_columns, X, y
-    
+        if return_scaler_encoder:
+            return df_aggregated, generated_feature_columns, numerical_columns, categorical_columns, X, y, scaler, encoder
+        else:
+            return df_aggregated, generated_feature_columns, numerical_columns, categorical_columns, X, y
     return df_aggregated, generated_feature_columns, numerical_columns, categorical_columns
 
 def normalize_names(df: pd.DataFrame) -> pd.DataFrame:

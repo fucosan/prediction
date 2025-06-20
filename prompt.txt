@@ -220,7 +220,7 @@ c. *Output for Training*:
 
 d. *Train / Test Split*:
 - Split the final dataset into training and test sets based on the End_Date (or Date) column:
-    - Use the *last 2 months of data as the test set* or it could be the last 2 weeks. (it can be parameterize)
+    - Use the *last 2 months of data as the test set* or it could be the last 2 weeks. or it could be data set of choosen year (it can be parameterize)
     - All data before that will be used as the training set
 - This simulates realistic future prediction scenarios and avoids data leakage
 
@@ -237,6 +237,7 @@ b. Evaluation Metrics:
 - Evaluate model performance using:
     - *Root Mean Squared Error (RMSE)*
     - *Mean Absolute Error (MAE)*
+    - save the metrics to file
 
 - Report these metrics on the *test set*
 
@@ -354,6 +355,33 @@ f. Usage:
     - Understand the model’s *upper-bound performance*
     - Contrast with recursive errors to measure the *impact of prediction drift*
 
+
+----------------------------------------------------------------------
+10.  INCREMENTAL / ONLINE UPDATE
+----------------------------------------------------------------------
+
+Purpose  
+• Allow daily (or ad-hoc) sales rows to refresh the pipeline **without retraining everything**.  
+• Reuse all fitted preprocessors and the existing XGBoost booster; append knowledge instead of starting over.
+
+What to build  
+• A new script **incremental_update.py** that  
+  – accepts a raw dataframe of the latest transactions,  
+  – processes it with the *same* Steps 1 → 4,  
+  – aggregates into 14-day windows that start *after* the most recent End_Date already in the store,  
+  – joins these windows to a rolling feature store (e.g., last ~ 12 months),  
+  – continues training the saved booster for a small number of extra boosting rounds,  
+  – overwrites the model file and appends the fresh rows + new RMSE/MAE to log files.
+
+Rules of engagement  
+• Never re-fit scalers/encoders—only transform.  
+• Site_No and Item_No remain identifiers (no encoding).  
+• Protect against leakage: lags/rolling for new rows may use historical actuals, never future data.  
+• Keep memory bounded with a configurable look-back window.  
+• If error on the newest month worsens by > 10 %, flag a performance-drift warning.
+
+Nothing else in the existing pipeline needs to change.
+
 ----------------------------------------------------------------------
 IMPLEMENTATION GUIDELINES
 ----------------------------------------------------------------------
@@ -366,6 +394,7 @@ IMPLEMENTATION GUIDELINES
 - implement number 7 in new file call train
 - implement number 8 in new file call test_recursive.py
 - implement number 9 in new file call test_regular.py
+- implement number 10 in new file call incremental_update.py
 
 ----------------------------------------------------------------------
 OUTPUT
