@@ -36,6 +36,68 @@ FEATURE_STORE_PATH = "feature_store.parquet"
 LOG_PATH = "incremental_update_log.csv"
 LOOKBACK_DAYS = 365  # ~12 months
 EXTRA_BOOST_ROUNDS = 10
+DATA_MAPPER_PATH = "data_mapper.csv"
+REFERENCE_DATA_PATH = "data.csv"
+
+def preprocess_raw_data(raw_data_path: str) -> str:
+    """
+    Preprocess raw data (Excel or CSV) by filtering based on data_mapper.csv
+    and return the path to the processed CSV file.
+    
+    Args:
+        raw_data_path: Path to the raw data file (Excel or CSV)
+    
+    Returns:
+        Path to the processed CSV file
+    """
+    print(f"Preprocessing raw data from {raw_data_path}")
+    
+    # Load the data_mapper.csv containing valid Item_No and Site_No pairs
+    mapper = pd.read_csv(DATA_MAPPER_PATH)
+    
+    # Determine file format and load accordingly
+    if raw_data_path.lower().endswith('.xlsx'):
+        new_data = pd.read_excel(raw_data_path)
+    else:
+        new_data = pd.read_csv(raw_data_path)
+    
+    # Merge to keep only rows where (Item_No, Site_No) pairs exist in data_mapper.csv
+    filtered_data = new_data.merge(mapper, on=['Item_No', 'Site_No'], how='inner')
+    
+    # Create processed file path
+    processed_file_path = 'new_raw_data.csv'
+    
+    # Save the filtered rows to new_raw_data.csv
+    filtered_data.to_csv(processed_file_path, index=False)
+    
+    print(f"Filtered data saved to {processed_file_path}")
+    
+    # Compare columns between data.csv and new_raw_data.csv
+    if os.path.exists(REFERENCE_DATA_PATH):
+        data = pd.read_csv(REFERENCE_DATA_PATH)
+        
+        # Get columns in data.csv but not in new_raw_data.csv
+        data_only_cols = sorted(set(data.columns) - set(filtered_data.columns))
+        # Get columns in new_raw_data.csv but not in data.csv
+        new_raw_only_cols = sorted(set(filtered_data.columns) - set(data.columns))
+        # Get common columns
+        common_cols = sorted(set(data.columns) & set(filtered_data.columns))
+        
+        print("\nColumns in reference data but NOT in new raw data:")
+        for col in data_only_cols:
+            print(f"  - {col}")
+        
+        print("\nColumns in new raw data but NOT in reference data:")
+        for col in new_raw_only_cols:
+            print(f"  - {col}")
+        
+        print(f"\nCommon columns: {len(common_cols)}/{len(data.columns)} columns match")
+        
+        # Warn if there are significant differences in columns
+        if len(data_only_cols) > 0:
+            print(f"WARNING: {len(data_only_cols)} columns are missing from the new data!")
+    
+    return processed_file_path
 
 def load_latest_transactions(csv_path: str) -> pd.DataFrame:
     """Load new transaction data from CSV file."""
@@ -136,10 +198,13 @@ def category_to_codes(df: pd.DataFrame, categorical_columns: List[str]) -> pd.Da
                 df[col] = df[col].astype('category').cat.codes
     return df
 
-def main(new_data_path: str) -> None:
+def main(raw_data_path: str) -> None:
     """Main function for incremental update."""
+    # Preprocess the raw data first
+    processed_data_path = preprocess_raw_data(raw_data_path)
+    
     # 1. Load new transactions and feature store
-    new_df = load_latest_transactions(new_data_path)
+    new_df = load_latest_transactions(processed_data_path)
     feature_store = load_feature_store()
     
     # 2. Preprocess new data (Steps 1-4)
@@ -286,6 +351,6 @@ def main(new_data_path: str) -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python incremental_update.py <new_data.csv>")
+        print("Usage: python incremental_update.py <raw_data.xlsx or raw_data.csv>")
     else:
         main(sys.argv[1])

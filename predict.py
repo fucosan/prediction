@@ -30,6 +30,69 @@ from processing import (
 FEATURE_STORE_PATH = "feature_store.parquet"
 MODEL_PATH = "xgboost_sales_model.json"
 LOOKBACK_DAYS = 365  # Days of history to use for feature calculation
+DATA_MAPPER_PATH = "data_mapper.csv"
+REFERENCE_DATA_PATH = "data.csv"
+
+def preprocess_future_data(future_data_path: str) -> str:
+    """
+    Preprocess future data (Excel or CSV) by filtering based on data_mapper.csv
+    and return the path to the processed CSV file.
+    
+    Args:
+        future_data_path: Path to the future data file (Excel or CSV)
+    
+    Returns:
+        Path to the processed CSV file
+    """
+    print(f"Preprocessing future data from {future_data_path}")
+    
+    # Load the data_mapper.csv containing valid Item_No and Site_No pairs
+    mapper = pd.read_csv(DATA_MAPPER_PATH)
+    
+    # Determine file format and load accordingly
+    if future_data_path.lower().endswith('.xlsx'):
+        future_data = pd.read_excel(future_data_path)
+    else:
+        future_data = pd.read_csv(future_data_path)
+    
+    # Merge to keep only rows where (Item_No, Site_No) pairs exist in data_mapper.csv
+    filtered_data = future_data.merge(mapper, on=['Item_No', 'Site_No'], how='inner')
+    
+    # Create processed file path
+    processed_file_path = 'filtered_future_data.csv'
+    
+    # Save the filtered rows to filtered_future_data.csv
+    filtered_data.to_csv(processed_file_path, index=False)
+    
+    print(f"Filtered data saved to {processed_file_path}")
+    print(f"Kept {len(filtered_data)}/{len(future_data)} rows after filtering ({len(filtered_data)/len(future_data)*100:.1f}%)")
+    
+    # Compare columns between data.csv and filtered future data
+    if os.path.exists(REFERENCE_DATA_PATH):
+        data = pd.read_csv(REFERENCE_DATA_PATH)
+        
+        # Get columns in data.csv but not in filtered data
+        data_only_cols = sorted(set(data.columns) - set(filtered_data.columns))
+        # Get columns in filtered data but not in data.csv
+        future_only_cols = sorted(set(filtered_data.columns) - set(data.columns))
+        # Get common columns
+        common_cols = sorted(set(data.columns) & set(filtered_data.columns))
+        
+        print("\nColumns in reference data but NOT in future data:")
+        for col in data_only_cols:
+            print(f"  - {col}")
+        
+        print("\nColumns in future data but NOT in reference data:")
+        for col in future_only_cols:
+            print(f"  - {col}")
+        
+        print(f"\nCommon columns: {len(common_cols)}/{len(data.columns)} columns match")
+        
+        # Warn if there are significant differences in columns
+        if len(data_only_cols) > 0:
+            print(f"WARNING: {len(data_only_cols)} columns are missing from the future data!")
+    
+    return processed_file_path
 
 def load_model_and_preprocessors():
     """Load the trained model, scaler and encoder."""
@@ -140,6 +203,9 @@ def predict_future_sales(future_data_path: str, output_path: str = "predictions.
         future_data_path: Path to CSV with future data points
         output_path: Output file path for predictions
     """
+    # 0. Preprocess and filter the future data first
+    processed_future_data_path = preprocess_future_data(future_data_path)
+    
     # 1. Load model and preprocessors
     model, scaler, encoder, numerical_columns, categorical_columns, feature_columns = load_model_and_preprocessors()
     
@@ -148,10 +214,10 @@ def predict_future_sales(future_data_path: str, output_path: str = "predictions.
     if feature_store.empty:
         print("Warning: No historical data found. Time-series features may be inaccurate.")
     
-    # 3. Load future data
-    print(f"Loading future data from {future_data_path}")
+    # 3. Load filtered future data
+    print(f"Loading processed future data from {processed_future_data_path}")
     try:
-        future_data = pd.read_csv(future_data_path)
+        future_data = pd.read_csv(processed_future_data_path)
         future_data['Date'] = pd.to_datetime(future_data['Date'])
     except Exception as e:
         print(f"Error loading future data: {e}")
