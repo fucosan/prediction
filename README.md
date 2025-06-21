@@ -114,6 +114,10 @@ python main_incremental.py data/new_data.csv
 # 5. Compare predictions with actual sales
 python3 main_compare.py output/predict/predictions_20250621_211011.csv data/new_data.xlsx
 
+
+# 6. Generate new data
+python3 main_gen_data.py data/new_data.xlsx --end-date 2025-06-26 --output-start-date 2025-06-13
+
 ```
 
 ### 7. Troubleshooting
@@ -126,3 +130,9 @@ If you encounter errors:
 4. For prediction errors, verify model file exists at the configured path
 
 For more detailed information, refer to the logs output during execution.
+
+NOTE for next steps:
+
+1. calculate lag and rolling features after 2 weeks aggregation
+2. fine-tune model parameters based on validation results
+   - the predctions seems to over predict, so we need to adjust the model parameters

@@ -14,9 +14,10 @@ INC_TRAIN_DIR = os.path.join(OUTPUT_DIR, "inc_train")
 TEST_DIR = os.path.join(OUTPUT_DIR, "test")
 PREDICT_DIR = os.path.join(OUTPUT_DIR, "predict")
 COMPARE_DIR = os.path.join(OUTPUT_DIR, "compare")
+GEN_DATA_DIR = os.path.join(OUTPUT_DIR, "gen_data")
 
 # Create output directories if they don't exist
-for directory in [OUTPUT_DIR, MODEL_DIR, PREPROCESS_DIR, INC_TRAIN_DIR, TEST_DIR, PREDICT_DIR, COMPARE_DIR]:
+for directory in [OUTPUT_DIR, MODEL_DIR, PREPROCESS_DIR, INC_TRAIN_DIR, TEST_DIR, PREDICT_DIR, COMPARE_DIR, GEN_DATA_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # Data files
