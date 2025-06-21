@@ -2,13 +2,14 @@
 Functions for making sales predictions
 """
 
+import pickle
+import os
 import pandas as pd
 import numpy as np
-import os
-import xgboost as xgb
 from typing import Tuple, Optional, List, Dict
 
 from config.config import MODEL_FILE
+import xgboost as xgb
 
 def predict_sales(
     X: pd.DataFrame,
@@ -30,9 +31,13 @@ def predict_sales(
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
     
-    # Load the model
-    model = xgb.XGBRegressor()
-    model.load_model(model_path)
+    # Use pickle to load the model instead of XGBoost's native method
+    try:
+        with open(model_path, 'rb') as f:
+            model = pickle.load(f)
+        print(f"Model loaded from {model_path}")
+    except Exception as e:
+        raise RuntimeError(f"Error loading model: {e}")
     
     print("Making predictions...")
     predictions = model.predict(X)

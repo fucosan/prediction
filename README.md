@@ -84,37 +84,39 @@ python main_predict.py data/data_to_predict.csv --output forecasts/june_forecast
 python main_predict.py data/data_to_predict.csv --confidence
 ```
 
+### 5. Compare Predictions with Actual Sales
+
+```bash
+# Basic comparison
+python main_compare.py output/predict/predictions.csv data/actual_sales.csv
+```
+
 Output files will be saved to `output/predict` by default.
 
-### 5. Common Workflows
+### 6. Common Workflows
 
 #### Weekly Forecast Update
 
 ```bash
 # 1. Update mapper with latest product list
-python data_mapper_cli.py update data/current_products.csv --mode deactivate_missing
+python data_mapper_cli.py update data/data.csv --mode deactivate_missing
 
-# 2. Update model with new sales data
-python main_incremental.py data/weekly_sales.csv --rounds 10
-
-# 3. Generate new forecasts
-python main_predict.py data/forecast_input.csv --output forecasts/week_23
-```
-
-#### Quarterly Model Retraining
-
-```bash
-# 1. Update data mapper
-python data_mapper_cli.py update data/product_catalog.csv --mode merge
-
-# 2. Full model retraining
+# 2. Train model from scratch
 python main_training.py
 
-# 3. Validate new model with test data
-python main_predict.py data/validation_data.csv --output validation/q2_validation
+# 3. Generate weekly forecasts
+## data could be csv or excel
+python main_predict.py data/new_data.xlsx
+
+# 4. Incremental update with new sales data
+python main_incremental.py data/new_data.csv
+
+# 5. Compare predictions with actual sales
+python3 main_compare.py output/predict/predictions_20250621_211011.csv data/new_data.xlsx
+
 ```
 
-### 6. Troubleshooting
+### 7. Troubleshooting
 
 If you encounter errors:
 
@@ -124,10 +126,3 @@ If you encounter errors:
 4. For prediction errors, verify model file exists at the configured path
 
 For more detailed information, refer to the logs output during execution.
-
-```bash
-python3 main_compare.py output/predict/predictions_20250620_222137.csv data/new_data.xlsx \ 22:43:08
---join-on "Site_No,Item_No" \
- --pred-date-col "Start_Date"
-
-```

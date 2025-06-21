@@ -11,7 +11,7 @@ from datetime import datetime
 def compare_predictions(
     predictions: pd.DataFrame,
     actuals: pd.DataFrame,
-    join_columns: List[str] = ['Site_No', 'Item_No', 'Date'],
+    join_columns: List[str] = ['Site_No', 'Item_No', 'Start_Date', 'End_Date'],
     prediction_column: str = 'Predicted_Quantity',
     actual_column: str = 'Quantity',
     include_all: bool = True
@@ -87,6 +87,30 @@ def compare_predictions(
     if include_all:
         merged.loc[merged[prediction_column].isna(), 'Status'] = 'actual_only'
         merged.loc[merged[actual_column].isna(), 'Status'] = 'prediction_only'
+    
+    # Reorder columns for better readability
+    # 1. Date columns
+    date_columns = [col for col in ['Start_Date', 'End_Date', 'Date'] if col in merged.columns]
+    
+    # 2. Key columns
+    key_columns = [col for col in ['Site_No', 'Item_No'] if col in merged.columns]
+    
+    # 3. Value columns side by side
+    value_columns = []
+    if actual_column in merged.columns:
+        value_columns.append(actual_column)
+    if prediction_column in merged.columns:
+        value_columns.append(prediction_column)
+    
+    # 4. Error metrics
+    error_columns = [col for col in merged.columns if col in ['Error', 'Abs_Error', 'Pct_Error', 'Abs_Pct_Error', 'Status']]
+    
+    # 5. Any other columns
+    other_columns = [col for col in merged.columns if col not in date_columns + key_columns + value_columns + error_columns]
+    
+    # Create new column order and reorder
+    new_column_order = date_columns + key_columns + value_columns + error_columns + other_columns
+    merged = merged[new_column_order]
     
     print(f"Created comparison with {len(merged)} rows")
     print(f"  - Matched records: {(merged['Status'] == 'matched').sum()}")

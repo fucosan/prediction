@@ -5,6 +5,7 @@ Functions to load prediction and actual data for comparison
 import pandas as pd
 from typing import Optional, List, Tuple
 import os
+from datetime import datetime, timedelta
 
 def load_prediction_data(
     prediction_path: str,
@@ -41,8 +42,9 @@ def load_prediction_data(
             modified_required = [col for col in required_columns if col != 'Date']
             if 'Start_Date' not in modified_required:
                 modified_required.append('Start_Date')
+                modified_required.append('End_Date')
             required_columns = modified_required
-            print("Using 'Start_Date' instead of 'Date' for predictions")
+            print("Using 'Start_Date'/'End_Date' instead of 'Date' for predictions")
     
     # Validate required columns
     if required_columns:
@@ -50,7 +52,7 @@ def load_prediction_data(
         if missing_cols:
             raise ValueError(f"Prediction data missing required columns: {missing_cols}")
     
-    # Convert date columns if present
+    # Convert date columns to datetime
     for date_col in ['Start_Date', 'End_Date', 'Date']:
         if date_col in predictions.columns:
             predictions[date_col] = pd.to_datetime(predictions[date_col])
@@ -91,16 +93,97 @@ def load_actual_data(
         if missing_cols:
             raise ValueError(f"Actual data missing required columns: {missing_cols}")
     
-    # Convert date columns if present
+    # Convert date columns to datetime
     for date_col in ['Start_Date', 'End_Date', 'Date']:
         if date_col in actuals.columns:
             actuals[date_col] = pd.to_datetime(actuals[date_col])
     
     return actuals
 
+def aggregate_actuals_by_date_range(
+    actuals: pd.DataFrame,
+    predictions: pd.DataFrame,
+    key_columns: List[str] = ['Site_No', 'Item_No'],
+    date_column: str = 'Date',
+    actual_value_column: str = 'Quantity'
+) -> pd.DataFrame:
+    """
+    Aggregate actual data to match prediction date ranges
+    
+    Args:
+        actuals: DataFrame with actual data
+        predictions: DataFrame with prediction data containing date ranges
+        key_columns: List of columns to use as keys (Site_No, Item_No)
+        date_column: Column name for date in actuals
+        actual_value_column: Column name for values to be aggregated
+    
+    Returns:
+        DataFrame with actual data aggregated to match prediction date ranges
+    """
+    print("Aggregating actual data to match prediction date ranges")
+    
+    # Check if predictions contain Start_Date and End_Date
+    if 'Start_Date' not in predictions.columns or 'End_Date' not in predictions.columns:
+        print("Warning: Predictions do not contain Start_Date/End_Date columns. Skipping aggregation.")
+        return actuals
+    
+    # Ensure date columns are datetime
+    actuals[date_column] = pd.to_datetime(actuals[date_column])
+    predictions['Start_Date'] = pd.to_datetime(predictions['Start_Date'])
+    predictions['End_Date'] = pd.to_datetime(predictions['End_Date'])
+    
+    # Extract unique date ranges and keys from predictions
+    date_ranges = predictions[key_columns + ['Start_Date', 'End_Date']].drop_duplicates()
+    print(f"Found {len(date_ranges)} unique date ranges in prediction data")
+    
+    # Initialize empty DataFrame for aggregated results
+    aggregated = []
+    
+    # Process each date range
+    for _, row in date_ranges.iterrows():
+        # Extract key values and date range
+        key_values = {col: row[col] for col in key_columns}
+        start_date = row['Start_Date']
+        end_date = row['End_Date']
+        
+        # Filter actuals for this key and date range
+        filter_conditions = [
+            (actuals[date_column] >= start_date),
+            (actuals[date_column] <= end_date)
+        ]
+        
+        for col in key_columns:
+            filter_conditions.append(actuals[col] == key_values[col])
+        
+        matching_actuals = actuals[pd.concat(filter_conditions, axis=1).all(axis=1)]
+        
+        # If there are matching records, aggregate them
+        if len(matching_actuals) > 0:
+            agg_value = matching_actuals[actual_value_column].sum()
+            
+            # Create result row
+            result = dict(key_values)
+            result['Start_Date'] = start_date
+            result['End_Date'] = end_date
+            result[date_column] = end_date  # Use end date as the reference date
+            result[actual_value_column] = agg_value
+            aggregated.append(result)
+    
+    if not aggregated:
+        print("Warning: No matching records found in actual data for prediction date ranges")
+        return pd.DataFrame(columns=actuals.columns)
+    
+    # Convert results to DataFrame
+    aggregated_df = pd.DataFrame(aggregated)
+    
+    print(f"Aggregated actual data into {len(aggregated_df)} records matching prediction date ranges")
+    
+    return aggregated_df
+
 def preprocess_data_for_comparison(
     predictions: pd.DataFrame,
-    actuals: pd.DataFrame
+    actuals: pd.DataFrame,
+    key_columns: List[str] = ['Site_No', 'Item_No']
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Preprocess prediction and actual data for comparison
@@ -117,16 +200,18 @@ def preprocess_data_for_comparison(
     proc_predictions = predictions.copy()
     proc_actuals = actuals.copy()
     
-    # Handle date column differences
-    if 'Date' in proc_actuals.columns and 'Date' not in proc_predictions.columns:
-        if 'End_Date' in proc_predictions.columns:
-            print("Using End_Date from predictions to match with Date in actuals")
-            proc_predictions['Date'] = proc_predictions['End_Date']
+    # Check if predictions contain Start_Date/End_Date and actuals contain Date
+    has_date_ranges = 'Start_Date' in proc_predictions.columns and 'End_Date' in proc_predictions.columns
+    has_date = 'Date' in proc_actuals.columns
     
-    if 'Date' in proc_actuals.columns and 'Start_Date' in proc_predictions.columns and 'End_Date' in proc_predictions.columns:
-        print("Filtering actuals to match prediction date range")
-        min_date = proc_predictions['Start_Date'].min()
-        max_date = proc_predictions['End_Date'].max()
-        proc_actuals = proc_actuals[(proc_actuals['Date'] >= min_date) & (proc_actuals['Date'] <= max_date)]
+    if has_date_ranges and has_date:
+        print("Aggregating actual data to match prediction date ranges")
+        proc_actuals = aggregate_actuals_by_date_range(
+            proc_actuals, 
+            proc_predictions,
+            key_columns=key_columns
+        )
+    else:
+        print("Warning: Cannot aggregate actuals by date range. Missing required date columns.")
     
     return proc_predictions, proc_actuals

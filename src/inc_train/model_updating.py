@@ -7,11 +7,11 @@ import numpy as np
 import xgboost as xgb
 import os
 import json
+import pickle
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
 
 from src.train import prepare_model_data, evaluate_model
-from src.train.model import load_model
 from config.config import MODEL_FILE, EXTRA_BOOST_ROUNDS, OUTPUT_DIR, INC_TRAIN_DIR
 
 def update_model(
@@ -55,24 +55,37 @@ def update_model(
     
     print(f"Continuing training with {len(X)} samples and {n_boost_rounds} additional boosting rounds")
     
-    # Continue training with new data
-    model.fit(
+    # Clone parameters from existing model
+    params = model.get_params()
+    
+    # Create a new model with more boosting rounds
+    n_estimators = params.get('n_estimators', 100) + n_boost_rounds
+    params['n_estimators'] = n_estimators
+    
+    # Remove any parameters that might cause issues
+    if 'xgb_model' in params:
+        del params['xgb_model']
+    
+    # Create a new model with updated parameters
+    updated_model = xgb.XGBRegressor(**params)
+    
+    # Initialize with existing trained model and continue training
+    updated_model.fit(
         X, y,
-        xgb_model=model_path,
+        xgb_model=model,  # Pass the model object, not the path
         verbose=True
     )
     
     # Evaluate updated model
-    y_pred, metrics = evaluate_model(model, X, y)
+    y_pred, metrics = evaluate_model(updated_model, X, y)
     
     # Save updated model
-    model.save_model(model_path)
-    print(f"Updated model saved to {model_path}")
+    save_updated_model(updated_model, model_path)
     
     # Log the update details
     log_update(len(X), n_boost_rounds, metrics)
     
-    return model, metrics
+    return updated_model, metrics
 
 def log_update(n_samples: int, n_rounds: int, metrics: Dict[str, float]) -> None:
     """
@@ -115,3 +128,27 @@ def log_update(n_samples: int, n_rounds: int, metrics: Dict[str, float]) -> None
         json.dump(log_data, f, indent=2, default=str)
     
     print(f"Update logged to {log_file}")
+
+# Add/update the import
+import pickle
+
+# Update the model loading function
+def load_model(model_path):
+    """Load existing model"""
+    # Change from:
+    # model = xgb.Booster()
+    # model.load_model(model_path)
+    # To:
+    with open(model_path, 'rb') as f:
+        model = pickle.load(f)
+    return model
+
+# Update the model saving function
+def save_updated_model(model, model_path):
+    """Save the updated model"""
+    # Change from:
+    # model.save_model(model_path)
+    # To:
+    with open(model_path, 'wb') as f:
+        pickle.dump(model, f)
+    print(f"Updated model saved to {model_path}")

@@ -11,12 +11,11 @@ from datetime import datetime
 from src.preprocess import process_sales_data, load_data
 from src.train import (
     prepare_model_data, 
-    split_time_series_data,
     train_xgboost_model,
-    evaluate_model,
     plot_actual_vs_predicted,
     plot_feature_importance
 )
+from src.train.evaluation import time_series_cv_evaluation
 
 # Import config settings
 from config.config import (
@@ -59,6 +58,8 @@ def main():
     numerical_cols = feature_metadata['numerical_columns']
     categorical_cols = feature_metadata['categorical_columns']
     
+    # 4. Create feature matrices
+    print("\n4. Creating feature matrices...")
     X, y, scaler, encoder = prepare_model_data(
         processed_data,
         numerical_columns=numerical_cols,
@@ -66,28 +67,21 @@ def main():
         target_column=TARGET_COLUMN
     )
     
-    # 4. Split data
-    print("\n4. Creating train/validation/test splits...")
-    X_train, X_valid, X_test, y_train, y_valid, y_test = split_time_series_data(
-        processed_data, X, y, use_all_for_train=True
-    )
+    # 5. Evaluate with time series CV and train final model
+    print("\n5. Evaluating with time series cross-validation...")
+    model = train_xgboost_model(X, y)  # Initial model for parameters
     
-    # 5. Train model
-    print("\n5. Training model...")
-    model = train_xgboost_model(
-        X_train, y_train, 
-        X_valid=X_valid, 
-        y_valid=y_valid
-    )
+    # This gives meaningful evaluation metrics while still using all data
+    cv_metrics, fold_metrics = time_series_cv_evaluation(model, X, y, n_splits=5, output_dir=OUTPUT_DIR)
     
-    # 6. Evaluate model
-    print("\n6. Evaluating model...")
-    y_pred, metrics = evaluate_model(model, X_test, y_test)
+    # Train final model on all data
+    print("\n6. Training final model on all data...")
+    final_model = train_xgboost_model(X, y)
     
     # 7. Create visualizations
     print("\n7. Creating visualizations...")
-    plot_actual_vs_predicted(y_test, y_pred)
-    plot_feature_importance(model, X.columns)
+    plot_actual_vs_predicted(y, final_model.predict(X))
+    plot_feature_importance(final_model, X.columns)
     
     print(f"\n=== Pipeline completed in {datetime.now() - start_time} ===")
 

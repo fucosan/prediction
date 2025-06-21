@@ -18,6 +18,9 @@ from src.compare import (
     generate_metrics_report
 )
 
+# Import the verification module
+from src.compare.verification import verify_missing_actuals, check_specific_record
+
 # Import config settings
 from config.config import (
     PREDICT_DIR,
@@ -41,9 +44,10 @@ def parse_arguments():
     parser.add_argument('--format', choices=['csv', 'excel', 'parquet', 'all'], 
                        default='all', help='Output format for comparison file')
     
+    # Updated default join columns to include date ranges
     parser.add_argument('--join-on', 
-                       help='Comma-separated list of columns to join on (default: Site_No,Item_No,Date)',
-                       default='Site_No,Item_No,Date')
+                       help='Comma-separated list of columns to join on (default: Site_No,Item_No,Start_Date,End_Date)',
+                       default='Site_No,Item_No,Start_Date,End_Date')
     
     parser.add_argument('--group-by',
                        help='Comma-separated list of columns to group metrics by',
@@ -66,8 +70,24 @@ def parse_arguments():
     # Add new argument for handling prediction date format
     parser.add_argument('--pred-date-col', 
                        choices=['Date', 'Start_Date', 'End_Date'],
-                       default='Date',
-                       help='Column to use for date in predictions (default: Date)')
+                       default='End_Date',
+                       help='Column to use for date in predictions (default: End_Date)')
+    
+    # Add option to skip aggregation
+    parser.add_argument('--no-aggregate', action='store_true',
+                       help='Skip aggregating actual data to prediction date ranges')
+    
+    # Add new arguments for verification
+    parser.add_argument('--verify-record', action='store_true',
+                       help='Verify a specific record')
+    parser.add_argument('--site-no', type=int,
+                       help='Site number to check')
+    parser.add_argument('--item-no', type=int,
+                       help='Item number to check')
+    parser.add_argument('--start-date', 
+                       help='Start date to check (YYYY-MM-DD)')
+    parser.add_argument('--end-date',
+                       help='End date to check (YYYY-MM-DD)')
     
     return parser.parse_args()
 
@@ -86,6 +106,12 @@ def main():
     date_mapping_needed = ('Start_Date' in join_columns or 'End_Date' in join_columns) and args.pred_date_col != 'Date'
     date_column_in_pred = args.pred_date_col if date_mapping_needed else None
     
+    # Extract key columns (non-date columns) for aggregation
+    key_columns = [col for col in join_columns if col not in ['Date', 'Start_Date', 'End_Date']]
+    
+    print("\nOutput will have columns ordered as: Date columns first (Start_Date, End_Date, Date), then Site_No, Item_No, "
+          f"followed by {args.actual_col} and {args.pred_col} side-by-side, then error metrics\n")
+    
     try:
         # 1. Load data
         print("\n1. Loading data files...")
@@ -99,7 +125,8 @@ def main():
         # Handle different date column names in actual data
         actual_join_cols = []
         for col in join_columns:
-            if col == 'Start_Date' or col == 'End_Date':
+            # If we're joining on Start_Date/End_Date but actuals have Date
+            if (col == 'Start_Date' or col == 'End_Date') and args.no_aggregate:
                 actual_join_cols.append('Date')
             else:
                 actual_join_cols.append(col)
@@ -109,23 +136,31 @@ def main():
         
         actuals = load_actual_data(
             args.actual_file,
-            required_columns=[args.actual_col] + actual_join_cols
+            required_columns=[args.actual_col] + [col for col in actual_join_cols if col != 'Start_Date' and col != 'End_Date'] + ['Date']
         )
         
         # 2. Preprocess data for comparison
         print("\n2. Preprocessing data...")
         
-        # Handle date column mapping
-        if date_mapping_needed:
-            print(f"Mapping '{date_column_in_pred}' in predictions to 'Date' in actuals")
-            # Create a copy of Date column with the name expected by comparison function
-            if 'Date' in actuals.columns:
-                for col in join_columns:
-                    if col == 'Start_Date' or col == 'End_Date':
-                        if col not in actuals.columns:
-                            actuals[col] = actuals['Date']
-        
-        proc_predictions, proc_actuals = preprocess_data_for_comparison(predictions, actuals)
+        if args.no_aggregate:
+            # Handle date column mapping without aggregation
+            if date_mapping_needed:
+                print(f"Mapping '{date_column_in_pred}' in predictions to 'Date' in actuals")
+                # Create a copy of Date column with the name expected by comparison function
+                if 'Date' in actuals.columns:
+                    for col in join_columns:
+                        if col == 'Start_Date' or col == 'End_Date':
+                            if col not in actuals.columns:
+                                actuals[col] = actuals['Date']
+                                
+            proc_predictions, proc_actuals = predictions.copy(), actuals.copy()
+        else:
+            # Preprocess with aggregation to handle date ranges
+            proc_predictions, proc_actuals = preprocess_data_for_comparison(
+                predictions, 
+                actuals,
+                key_columns=key_columns
+            )
         
         # 3. Compare predictions with actuals
         print("\n3. Comparing predictions with actual data...")
@@ -138,8 +173,23 @@ def main():
             include_all=not args.matched_only
         )
         
-        # 4. Save comparison results
-        print("\n4. Saving comparison results...")
+        # 4. Verifying prediction-only records...
+        verification_results = verify_missing_actuals(
+            predictions=predictions,
+            actuals=actuals,
+            comparison_df=comparison,
+            key_columns=key_columns,
+            date_columns=['Start_Date', 'End_Date'],
+            output_dir=COMPARE_DIR
+        )
+        
+        # Example of checking a specific record (uncomment to use)
+        # if 'Site_No' in actuals.columns and 'Item_No' in actuals.columns:
+        #    check_specific_record(actuals, site_no=10003, item_no=200017407, 
+        #                         start_date='2025-05-30', end_date='2025-06-12')
+        
+        # 5. Save comparison results
+        print("\n5. Saving comparison results...")
         output_base = args.output if args.output else os.path.join(
             COMPARE_DIR, f"comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         )
@@ -147,8 +197,8 @@ def main():
         formats = ['csv', 'excel', 'parquet'] if args.format == 'all' else [args.format]
         output_files = save_comparison_results(comparison, output_base, COMPARE_DIR, formats)
         
-        # 5. Calculate metrics
-        print("\n5. Calculating performance metrics...")
+        # 6. Calculate metrics
+        print("\n6. Calculating performance metrics...")
         metrics = calculate_metrics(
             comparison,
             prediction_column=args.pred_col,
@@ -156,8 +206,8 @@ def main():
             group_by_columns=group_by_columns
         )
         
-        # 6. Generate metrics report
-        print("\n6. Generating metrics report...")
+        # 7. Generate metrics report
+        print("\n7. Generating metrics report...")
         metric_files = generate_metrics_report(
             metrics,
             comparison,
@@ -176,6 +226,21 @@ def main():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+    if args.verify_record and args.site_no is not None and args.item_no is not None:
+        print("\nChecking specific record:")
+        specific_records = check_specific_record(
+            actuals=actuals,
+            site_no=args.site_no,
+            item_no=args.item_no,
+            start_date=args.start_date,
+            end_date=args.end_date
+        )
+        if len(specific_records) > 0:
+            print("\nMatching records:")
+            print(specific_records[['Date', 'Site_No', 'Item_No', 'Quantity']].to_string())
+        else:
+            print("No matching records found.")
 
 if __name__ == "__main__":
     main()

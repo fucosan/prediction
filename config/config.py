@@ -24,7 +24,7 @@ DATA_MAPPER_PATH = os.path.join(PREPROCESS_DIR, "data_mapper.csv")
 REFERENCE_DATA_PATH = os.path.join(BASE_DIR, "data", "data.csv")
 
 # Model files
-MODEL_PATH = os.path.join(MODEL_DIR, "xgboost_sales_model.json")
+MODEL_PATH = os.path.join(MODEL_DIR, "xgboost_sales_model.pkl")
 SCALER_PATH = os.path.join(MODEL_DIR, "scaler.pkl")
 ENCODER_PATH = os.path.join(MODEL_DIR, "encoder.pkl")
 FEATURE_STORE_PATH = os.path.join(PREPROCESS_DIR, "feature_store.parquet")
@@ -53,7 +53,7 @@ KEEP_COLS = [
     'Selling_Price_Incl_PPN_IDR',
     'Site_No',
     'Sub_Category_Name',
-    'Total_Sales_Incl_PPN_IDR',
+    # 'Total_Sales_Incl_PPN_IDR',
     'Unit_of_Measure',
     'Vendor_No'
 ]
@@ -93,7 +93,7 @@ TRAIN_TEST_SPLIT_PARAMS = {
 }
 
 # File paths for model artifacts
-MODEL_FILE = os.path.join(MODEL_DIR, "xgboost_sales_model.json")
+MODEL_FILE = os.path.join(MODEL_DIR, "xgboost_sales_model.pkl")
 METRICS_FILE = os.path.join(OUTPUT_DIR, "model_metrics.csv")
 FEATURE_IMPORTANCE_PLOT = os.path.join(OUTPUT_DIR, "feature_importance.png")
 PREDICTION_PLOT = os.path.join(OUTPUT_DIR, "actual_vs_predicted.png")

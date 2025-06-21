@@ -7,6 +7,7 @@ import numpy as np
 import xgboost as xgb
 import joblib
 import os
+import pickle
 from typing import Dict, Any, Optional
 
 from config.config import XGBOOST_PARAMS, MODEL_FILE
@@ -73,7 +74,9 @@ def train_xgboost_model(
     # Save model if requested
     if save_model:
         os.makedirs(os.path.dirname(MODEL_FILE), exist_ok=True)
-        model.save_model(MODEL_FILE)
+        # Use pickle instead of save_model
+        with open(MODEL_FILE, 'wb') as f:
+            pickle.dump(model, f)
         print(f"Model saved to {MODEL_FILE}")
     
     return model
@@ -94,7 +97,16 @@ def load_model(model_path: str = MODEL_FILE) -> xgb.XGBRegressor:
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
     
-    model = xgb.XGBRegressor()
-    model.load_model(model_path)
+    # Use pickle instead of load_model
+    with open(model_path, 'rb') as f:
+        model = pickle.load(f)
     
     return model
+
+def save_model(model, filepath, encoder=None, scaler=None):
+    """Save the model and preprocessing objects to disk"""
+    with open(filepath, 'wb') as f:
+        pickle.dump(model, f)
+    print(f"Model saved to {filepath}")
+    
+    # Keep the rest of the function that saves encoder/scaler

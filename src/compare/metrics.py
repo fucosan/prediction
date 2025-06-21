@@ -31,10 +31,11 @@ def calculate_metrics(
     """
     print("Calculating error metrics")
     
-    # Filter to only matched records with actual data
+    # Filter to only matched records with both prediction and actual data
     matched_data = comparison_df[
         (comparison_df['Status'] == 'matched') & 
-        (~comparison_df[actual_column].isna())
+        (~comparison_df[actual_column].isna()) &
+        (~comparison_df[prediction_column].isna())
     ].copy()
     
     if len(matched_data) == 0:
