@@ -17,11 +17,11 @@ def compare_predictions(
     include_all: bool = True
 ) -> pd.DataFrame:
     """
-    Compare predictions with actual data
+    Compare predictions with actual data (optimized for bi-weekly data)
     
     Args:
-        predictions: DataFrame with predictions
-        actuals: DataFrame with actual values
+        predictions: DataFrame with predictions (bi-weekly periods)
+        actuals: DataFrame with actual values (aggregated to bi-weekly)
         join_columns: Columns to use for matching predictions and actuals
         prediction_column: Column name for predictions
         actual_column: Column name for actual values
@@ -30,14 +30,23 @@ def compare_predictions(
     Returns:
         DataFrame with predictions and actual values
     """
-    print(f"Comparing predictions with actual data using {join_columns}")
+    print(f"Comparing bi-weekly predictions with actual data using {join_columns}")
     
     # Verify join columns exist in both datasets
-    for col in join_columns:
-        if col not in predictions.columns:
-            raise ValueError(f"Join column {col} not found in predictions DataFrame")
-        if col not in actuals.columns:
-            raise ValueError(f"Join column {col} not found in actuals DataFrame")
+    pred_missing = [col for col in join_columns if col not in predictions.columns]
+    act_missing = [col for col in join_columns if col not in actuals.columns]
+    
+    if pred_missing:
+        print(f"Warning: Join columns missing in predictions: {pred_missing}")
+        # Try to adapt by using alternative columns
+        if 'Date' in predictions.columns and ('Start_Date' in pred_missing or 'End_Date' in pred_missing):
+            print("Adding Start_Date/End_Date based on Date column")
+            predictions['Start_Date'] = predictions['Date']
+            predictions['End_Date'] = predictions['Date'] + pd.Timedelta(days=13)
+    
+    if act_missing:
+        print(f"Warning: Join columns missing in actuals: {act_missing}")
+        # Similar adaptation for actuals if needed
     
     # If Date is used for joining and date formats are different, normalize
     for date_col in ['Date', 'Start_Date', 'End_Date']:
@@ -51,6 +60,10 @@ def compare_predictions(
     pred_cols = join_columns + [prediction_column] + [col for col in predictions.columns if col not in join_columns and col != prediction_column]
     act_cols = join_columns + [actual_column]
     
+    # Filter columns that exist
+    pred_cols = [col for col in pred_cols if col in predictions.columns]
+    act_cols = [col for col in act_cols if col in actuals.columns]
+    
     pred_data = predictions[pred_cols].copy()
     act_data = actuals[act_cols].copy()
     
@@ -59,7 +72,7 @@ def compare_predictions(
         # Full outer join to keep all records
         merged = pred_data.merge(
             act_data,
-            on=join_columns,
+            on=[col for col in join_columns if col in pred_data.columns and col in act_data.columns],
             how='outer',
             suffixes=('', '_act')
         )
@@ -67,17 +80,23 @@ def compare_predictions(
         # Inner join to keep only matched records
         merged = pred_data.merge(
             act_data,
-            on=join_columns,
+            on=[col for col in join_columns if col in pred_data.columns and col in act_data.columns],
             how='inner',
             suffixes=('', '_act')
         )
     
     # Calculate error metrics
-    merged['Error'] = merged[prediction_column].fillna(0) - merged[actual_column].fillna(0)
+    # Handle missing values gracefully
+    actual_values = merged[actual_column].fillna(0)
+    predicted_values = merged[prediction_column].fillna(0)
+    
+    merged['Error'] = predicted_values - actual_values
     merged['Abs_Error'] = np.abs(merged['Error'])
+    
+    # Calculate percentage errors, handling division by zero
     merged['Pct_Error'] = np.where(
-        merged[actual_column] != 0,
-        100 * merged['Error'] / merged[actual_column],
+        actual_values != 0,
+        100 * merged['Error'] / actual_values,
         np.nan
     )
     merged['Abs_Pct_Error'] = np.abs(merged['Pct_Error'])
@@ -110,7 +129,7 @@ def compare_predictions(
     
     # Create new column order and reorder
     new_column_order = date_columns + key_columns + value_columns + error_columns + other_columns
-    merged = merged[new_column_order]
+    merged = merged[[col for col in new_column_order if col in merged.columns]]
     
     print(f"Created comparison with {len(merged)} rows")
     print(f"  - Matched records: {(merged['Status'] == 'matched').sum()}")

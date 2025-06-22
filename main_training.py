@@ -6,6 +6,7 @@ Main script for sales prediction system using centralized config
 import os
 import pandas as pd
 from datetime import datetime
+import pickle
 
 # Import modules from the new structure
 from src.preprocess import process_sales_data, load_data
@@ -86,4 +87,4 @@ def main():
     print(f"\n=== Pipeline completed in {datetime.now() - start_time} ===")
 
 if __name__ == "__main__":
-    main()
+    main()  # This will now use the bi-weekly first approach automatically

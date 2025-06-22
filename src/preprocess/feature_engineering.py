@@ -7,120 +7,133 @@ import numpy as np
 from typing import List, Tuple, Dict, Optional
 from config.config import LAG_PERIODS, WINDOW_SIZES, ROLLING_METRICS, TIME_CATEGORICALS, DATE_FIELDS, ID_COLUMNS
 
-def add_lag_features(df: pd.DataFrame, lag_periods: List[int] = LAG_PERIODS) -> Tuple[pd.DataFrame, List[str]]:
+def add_lag_features(df, lag_periods, date_col='Date'):
     """
-    Add lag features to the DataFrame.
+    Add lagged values of the target column as features.
     
     Args:
-        df: DataFrame with Date, Site_No, Item_No, and Quantity columns
-        lag_periods: List of lag periods to create features for
+        df: Input DataFrame
+        lag_periods: List of lag periods to create
+        date_col: Column name to use as the date (default: 'Date')
         
     Returns:
-        Tuple of (DataFrame with lag features, List of feature column names)
+        Tuple of (DataFrame with lag features, List of created feature names)
     """
-    df = df.copy()
-    feature_cols = []
+    print(f"Adding lag features using {date_col}...")
+    df_copy = df.copy()
     
-    # Sort by (Site_No, Item_No, Date) to ensure correct lag calculation
-    df = df.sort_values(['Site_No', 'Item_No', 'Date'])
+    # Ensure the DataFrame is sorted by site, item, and date
+    df_copy = df_copy.sort_values(['Site_No', 'Item_No', date_col])
     
     # Create lag features
+    all_lag_cols = []
     for lag in lag_periods:
         col_name = f'lag_{lag}'
-        df[col_name] = df.groupby(['Site_No', 'Item_No'])['Quantity'].shift(lag)
-        # Fill NaN values with 0 as required by the prompt
-        df[col_name] = df[col_name].fillna(0)
-        feature_cols.append(col_name)
+        df_copy[col_name] = df_copy.groupby(['Site_No', 'Item_No'])['Quantity'].shift(lag)
+        all_lag_cols.append(col_name)
     
-    return df, feature_cols
+    return df_copy, all_lag_cols
 
-def add_rolling_window_features(df: pd.DataFrame, 
-                               window_sizes: List[int] = WINDOW_SIZES, 
-                               metrics: List[str] = ROLLING_METRICS) -> Tuple[pd.DataFrame, List[str]]:
+def add_rolling_window_features(df, window_sizes, metrics, date_col='Date'):
     """
-    Add rolling window features to the DataFrame, using lagged values to prevent data leakage.
+    Add rolling window statistics as features.
     
     Args:
-        df: DataFrame with Date, Site_No, Item_No, and Quantity columns
-        window_sizes: List of window sizes to create features for
-        metrics: List of metrics to calculate (default: mean, sum, std)
+        df: Input DataFrame
+        window_sizes: List of window sizes
+        metrics: List of metrics to calculate (mean, sum, etc.)
+        date_col: Column name to use as the date (default: 'Date')
         
     Returns:
-        Tuple of (DataFrame with rolling features, List of feature column names)
+        Tuple of (DataFrame with added features, List of created feature names)
     """
-    df = df.copy()
-    feature_cols = []
+    print(f"Adding rolling window features using {date_col}...")
+    df_copy = df.copy()
+    all_rolling_cols = []
     
-    # Sort by (Site_No, Item_No, Date) to ensure correct rolling calculation
-    df = df.sort_values(['Site_No', 'Item_No', 'Date'])
+    # Ensure the DataFrame is sorted by site, item, and date
+    df_copy = df_copy.sort_values(['Site_No', 'Item_No', date_col])
     
-    # Shift Quantity by 1 to prevent using current day's value in rolling calculations
-    df['Quantity_lagged'] = df.groupby(['Site_No', 'Item_No'])['Quantity'].shift(1)
-    # Fill NaN values with 0 as required by the prompt
-    df['Quantity_lagged'] = df['Quantity_lagged'].fillna(0)
+    # Create a new column with lagged Quantity for rolling calculations
+    df_copy['Quantity_lagged'] = df_copy.groupby(['Site_No', 'Item_No'])['Quantity'].shift(1)
     
-    # Create rolling window features
+    # Create rolling features
     for window in window_sizes:
         for metric in metrics:
+            col_name = f'rolling_{metric}_{window}'
+            
+            # Calculate rolling metrics using the lagged quantity
             if metric == 'mean':
-                col_name = f'rolling_mean_{window}'
-                df[col_name] = df.groupby(['Site_No', 'Item_No'])['Quantity_lagged'].transform(
+                df_copy[col_name] = df_copy.groupby(['Site_No', 'Item_No'])['Quantity_lagged'].transform(
                     lambda x: x.rolling(window, min_periods=1).mean()
                 )
             elif metric == 'sum':
-                col_name = f'rolling_sum_{window}'
-                df[col_name] = df.groupby(['Site_No', 'Item_No'])['Quantity_lagged'].transform(
+                df_copy[col_name] = df_copy.groupby(['Site_No', 'Item_No'])['Quantity_lagged'].transform(
                     lambda x: x.rolling(window, min_periods=1).sum()
                 )
             elif metric == 'std':
-                col_name = f'rolling_std_{window}'
-                df[col_name] = df.groupby(['Site_No', 'Item_No'])['Quantity_lagged'].transform(
-                    lambda x: x.rolling(window, min_periods=1).std()
+                df_copy[col_name] = df_copy.groupby(['Site_No', 'Item_No'])['Quantity_lagged'].transform(
+                    lambda x: x.rolling(window, min_periods=1).std().fillna(0)
                 )
-            
-            # Fill any NaN values with 0 (this may happen with std calculation when all values are the same)
-            df[col_name] = df[col_name].fillna(0)
-            feature_cols.append(col_name)
+                
+            all_rolling_cols.append(col_name)
     
     # Drop the temporary column
-    df = df.drop(columns=['Quantity_lagged'])
+    df_copy = df_copy.drop(columns=['Quantity_lagged'])
     
-    return df, feature_cols
+    return df_copy, all_rolling_cols
 
-def add_days_since_last_sale(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
+def add_days_since_last_sale(df, date_col='Date'):
     """
-    Add a feature that tracks days since last sale.
+    Add a feature for days/periods since last non-zero sale
     
     Args:
-        df: DataFrame with Date, Site_No, Item_No, and Quantity columns
+        df: Input DataFrame
+        date_col: Column name to use as the date (default: 'Date')
         
     Returns:
-        Tuple of (DataFrame with days_since_last_sale feature, List of feature column names)
+        Tuple of (DataFrame with added feature, List of created feature names)
     """
-    df = df.copy()
-    feature_cols = ['days_since_last_sale']
+    print(f"Adding days since last sale feature using {date_col}...")
+    # Create a copy of the input DataFrame
+    df_copy = df.copy()
     
-    # Sort by (Site_No, Item_No, Date)
-    df = df.sort_values(['Site_No', 'Item_No', 'Date'])
+    # Ensure the DataFrame is sorted by site, item, and date
+    df_copy = df_copy.sort_values(['Site_No', 'Item_No', date_col])
     
-    # Initialize days_since_last_sale
-    df['days_since_last_sale'] = 0
+    # Create a new column to store days or periods since last sale
+    col_name = 'periods_since_last_sale'
     
-    # Calculate days_since_last_sale for each (Site_No, Item_No) group
-    for (site, item), group in df.groupby(['Site_No', 'Item_No']):
-        days_count = 0
-        days_since_list = []
+    # Initialize the column with a high number (indicating "never sold before")
+    df_copy[col_name] = 999
+    
+    # For each Site_No and Item_No combination
+    for (site, item), group in df_copy.groupby(['Site_No', 'Item_No']):
+        # Get indices for this group
+        indices = group.index
         
-        for quantity in group['Quantity']:
-            if quantity > 0:
-                days_count = 0
+        # Initialize counter
+        counter = 999  # Start with a high number
+        
+        # Temporary array to hold values for this group
+        values = np.zeros(len(indices))
+        
+        # Iterate through the group
+        for i, (idx, row) in enumerate(group.iterrows()):
+            if row['Quantity'] > 0:
+                # If there's a sale, reset counter to 0
+                counter = 0
             else:
-                days_count += 1
-            days_since_list.append(days_count)
+                # If no sale, increment counter
+                counter += 1
+            
+            # Store the counter value
+            values[i] = counter
         
-        df.loc[(df['Site_No'] == site) & (df['Item_No'] == item), 'days_since_last_sale'] = days_since_list
+        # Assign values back to the dataframe
+        df_copy.loc[indices, col_name] = values
     
-    return df, feature_cols
+    return df_copy, [col_name]
 
 def add_holiday_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     """

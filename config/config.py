@@ -38,6 +38,11 @@ LAG_PERIODS = [1, 2, 3, 7, 14]
 WINDOW_SIZES = [3, 7, 14, 28]
 ROLLING_METRICS = ['mean', 'sum', 'std']
 
+# Bi-weekly specific feature parameters
+# These represent number of periods, not days
+BI_WEEKLY_LAG_PERIODS = [1, 2, 3, 4, 6, 8, 12]  # Previous periods (2 weeks to 24 weeks)
+BI_WEEKLY_WINDOW_SIZES = [2, 4, 6, 12, 26]  # Rolling windows (1 month to 12 months)
+
 # Column groups
 KEEP_COLS = [
     'Add_Periodic_Disc_Amount_IDR',

@@ -35,27 +35,22 @@ def load_prediction_data(
     
     print(f"Loaded {len(predictions)} prediction records")
     
-    # Handle Date vs Start_Date/End_Date mapping
-    if 'Date' not in predictions.columns and 'Start_Date' in predictions.columns:
-        if required_columns and 'Date' in required_columns:
-            # If Date is required but we have Start_Date/End_Date, modify required_columns
-            modified_required = [col for col in required_columns if col != 'Date']
-            if 'Start_Date' not in modified_required:
-                modified_required.append('Start_Date')
-                modified_required.append('End_Date')
-            required_columns = modified_required
-            print("Using 'Start_Date'/'End_Date' instead of 'Date' for predictions")
+    # Bi-weekly first expects Start_Date and End_Date
+    if 'Start_Date' not in predictions.columns and 'Date' in predictions.columns:
+        print("Converting 'Date' to 'Start_Date'/'End_Date' for bi-weekly compatibility")
+        predictions['Start_Date'] = predictions['Date']
+        predictions['End_Date'] = predictions['Date'] + pd.Timedelta(days=13)  # Assume 2-week periods
+    
+    # Convert date columns to datetime
+    for date_col in ['Start_Date', 'End_Date', 'Date']:
+        if date_col in predictions.columns:
+            predictions[date_col] = pd.to_datetime(predictions[date_col])
     
     # Validate required columns
     if required_columns:
         missing_cols = [col for col in required_columns if col not in predictions.columns]
         if missing_cols:
             raise ValueError(f"Prediction data missing required columns: {missing_cols}")
-    
-    # Convert date columns to datetime
-    for date_col in ['Start_Date', 'End_Date', 'Date']:
-        if date_col in predictions.columns:
-            predictions[date_col] = pd.to_datetime(predictions[date_col])
     
     return predictions
 

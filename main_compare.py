@@ -44,7 +44,7 @@ def parse_arguments():
     parser.add_argument('--format', choices=['csv', 'excel', 'parquet', 'all'], 
                        default='all', help='Output format for comparison file')
     
-    # Updated default join columns to include date ranges
+    # Update this line
     parser.add_argument('--join-on', 
                        help='Comma-separated list of columns to join on (default: Site_No,Item_No,Start_Date,End_Date)',
                        default='Site_No,Item_No,Start_Date,End_Date')
@@ -67,7 +67,7 @@ def parse_arguments():
     parser.add_argument('--no-plots', action='store_true',
                        help='Skip creating visualization plots')
     
-    # Add new argument for handling prediction date format
+    # Update this line
     parser.add_argument('--pred-date-col', 
                        choices=['Date', 'Start_Date', 'End_Date'],
                        default='End_Date',

@@ -25,25 +25,41 @@ from config.config import (
 
 def process_sales_data(
     df: pd.DataFrame,
-    lag_periods: List[int] = LAG_PERIODS,
-    window_sizes: List[int] = WINDOW_SIZES,
+    bi_weekly_lag_periods: List[int] = None,
+    bi_weekly_window_sizes: List[int] = None,
     rolling_metrics: List[str] = ROLLING_METRICS,
     save_metadata: bool = True
 ) -> Tuple[pd.DataFrame, Dict[str, List[str]]]:
     """
-    Main processing function that orchestrates the full preprocessing workflow.
+    Main processing function that first aggregates to bi-weekly periods,
+    then creates time series features on the aggregated data.
     
     Args:
         df: DataFrame with sales data
-        lag_periods: List of lag periods for feature creation
-        window_sizes: List of window sizes for rolling features
+        bi_weekly_lag_periods: List of lag periods for bi-weekly data
+        bi_weekly_window_sizes: List of window sizes for bi-weekly data
         rolling_metrics: Metrics to calculate for rolling windows
         save_metadata: Whether to save metadata files
     
     Returns:
         Tuple of (Processed DataFrame, Dictionary of feature metadata)
     """
-    print("Starting sales data preprocessing...")
+    print("Starting sales data preprocessing (bi-weekly first approach)...")
+    # Use bi-weekly specific params if provided, otherwise use defaults
+    if bi_weekly_lag_periods is None:
+        try:
+            from config.config import BI_WEEKLY_LAG_PERIODS
+            bi_weekly_lag_periods = BI_WEEKLY_LAG_PERIODS
+        except ImportError:
+            bi_weekly_lag_periods = [1, 2, 3, 4, 6, 8, 12]
+            
+    if bi_weekly_window_sizes is None:
+        try:
+            from config.config import BI_WEEKLY_WINDOW_SIZES
+            bi_weekly_window_sizes = BI_WEEKLY_WINDOW_SIZES
+        except ImportError:
+            bi_weekly_window_sizes = [2, 4, 6, 12, 26]
+            
     # Track features and execution time
     start_time = datetime.now()
     feature_metadata = {}
@@ -62,50 +78,58 @@ def process_sales_data(
     print("Step 2: Normalizing daily time series...")
     df_normalized = normalize_daily_time_series(df_cleaned)
     
-    # Step 3: Add lag features
-    print(f"Step 3: Adding lag features (periods: {lag_periods})...")
-    df_with_lags, lag_cols = add_lag_features(df_normalized, lag_periods)
-    feature_metadata['lag_features'] = lag_cols
-    all_generated_features.extend(lag_cols)
+    # Step 3: FIRST aggregate to bi-weekly periods
+    print("Step 3: Aggregating to bi-weekly periods FIRST...")
+    df_aggregated = aggregate_biweekly(df_normalized)
     
-    # Step 4: Add rolling window features
-    print(f"Step 4: Adding rolling window features (windows: {window_sizes}, metrics: {rolling_metrics})...")
-    df_with_rolling, rolling_cols = add_rolling_window_features(
-        df_with_lags, window_sizes, rolling_metrics)
-    feature_metadata['rolling_features'] = rolling_cols
-    all_generated_features.extend(rolling_cols)
-    
-    # Step 5: Add days since last sale
-    print("Step 5: Adding days since last sale feature...")
-    df_enriched, days_since_cols = add_days_since_last_sale(df_with_rolling)
-    feature_metadata['days_since_features'] = days_since_cols
-    all_generated_features.extend(days_since_cols)
-    
-    # Step 6: Add holiday features
-    print("Step 6: Adding holiday features...")
-    df_with_holidays, holiday_cols = add_holiday_features(df_enriched)
-    feature_metadata['holiday_features'] = holiday_cols
-    all_generated_features.extend(holiday_cols)
-    
-    # Step 7: Add calendar features
-    print("Step 7: Adding calendar features...")
-    df_with_calendar, calendar_cols = add_calendar_features(df_with_holidays)
+    # Step 4: Add calendar features (these should come early as they're used by other features)
+    print("Step 4: Adding calendar features...")
+    # Calculate these based on the Start_Date of each bi-weekly period
+    df_aggregated['Date'] = df_aggregated['Start_Date']  # Temp fix for function compatibility
+    df_with_calendar, calendar_cols = add_calendar_features(df_aggregated)
+    df_with_calendar = df_with_calendar.drop(columns=['Date'])  # Remove temporary column
     feature_metadata['calendar_features'] = calendar_cols
     all_generated_features.extend(calendar_cols)
     
-    # Step 8: Add promo feature
-    print("Step 8: Adding promotion features...")
-    df_with_promo, promo_cols = add_promo_feature(df_with_calendar)
+    # Step 5: Add holiday features
+    print("Step 5: Adding holiday features...")
+    # Add a Date column temporarily for holiday function compatibility
+    df_with_calendar['Date'] = df_with_calendar['Start_Date']
+    df_with_holidays, holiday_cols = add_holiday_features(df_with_calendar)
+    df_with_holidays = df_with_holidays.drop(columns=['Date'])  # Remove temporary column
+    feature_metadata['holiday_features'] = holiday_cols
+    all_generated_features.extend(holiday_cols)
+    
+    # Step 6: Add lag features (using bi-weekly periods)
+    print(f"Step 6: Adding bi-weekly lag features (periods: {bi_weekly_lag_periods})...")
+    # Sort data properly for bi-weekly lags
+    df_sorted = df_with_holidays.sort_values(['Site_No', 'Item_No', 'Start_Date'])
+    df_with_lags, lag_cols = add_lag_features(df_sorted, bi_weekly_lag_periods, date_col='Start_Date')
+    feature_metadata['lag_features'] = lag_cols
+    all_generated_features.extend(lag_cols)
+    
+    # Step 7: Add rolling window features (using bi-weekly periods)
+    print(f"Step 7: Adding bi-weekly rolling window features (windows: {bi_weekly_window_sizes})...")
+    df_with_rolling, rolling_cols = add_rolling_window_features(
+        df_with_lags, bi_weekly_window_sizes, rolling_metrics, date_col='Start_Date')
+    feature_metadata['rolling_features'] = rolling_cols
+    all_generated_features.extend(rolling_cols)
+    
+    # Step 8: Add days since last sale (on bi-weekly data)
+    print("Step 8: Adding days since last sale feature...")
+    df_enriched, days_since_cols = add_days_since_last_sale(df_with_rolling, date_col='Start_Date')
+    feature_metadata['days_since_features'] = days_since_cols
+    all_generated_features.extend(days_since_cols)
+    
+    # Step 9: Add promo feature (on bi-weekly data)
+    print("Step 9: Adding promotion features...")
+    df_with_promo, promo_cols = add_promo_feature(df_enriched)
     feature_metadata['promo_features'] = promo_cols
     all_generated_features.extend(promo_cols)
     
-    # Step 9: Aggregate to biweekly periods
-    print("Step 9: Aggregating to biweekly periods...")
-    df_aggregated = aggregate_biweekly(df_with_promo)
-    
     # Step 10: Classify data types
     print("Step 10: Classifying data types...")
-    numerical_columns, categorical_columns = classify_data_types(df_aggregated)
+    numerical_columns, categorical_columns = classify_data_types(df_with_promo)
     feature_metadata['numerical_columns'] = numerical_columns
     feature_metadata['categorical_columns'] = categorical_columns
     
@@ -129,6 +153,6 @@ def process_sales_data(
     end_time = datetime.now()
     print(f"Preprocessing completed in {end_time - start_time}.")
     print(f"Generated {len(all_generated_features)} features.")
-    print(f"Final dataset shape: {df_aggregated.shape}")
+    print(f"Final dataset shape: {df_with_promo.shape}")
     
-    return df_aggregated, feature_metadata
+    return df_with_promo, feature_metadata

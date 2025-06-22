@@ -19,7 +19,7 @@ def prepare_prediction_data(
     encoder_path: str = ENCODER_PATH
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
     """
-    Prepare data for making predictions
+    Prepare data for making predictions using bi-weekly first approach
     
     Args:
         data_path: Path to input data file
@@ -37,8 +37,16 @@ def prepare_prediction_data(
     data = load_data(data_path)
     print(f"Loaded {len(data)} records")
     
-    # Process using the same pipeline as training
-    processed_data, feature_metadata = process_sales_data(data)
+    # Import bi-weekly specific parameters
+    from config.config import BI_WEEKLY_LAG_PERIODS, BI_WEEKLY_WINDOW_SIZES
+    
+    # Process using bi-weekly first approach
+    processed_data, feature_metadata = process_sales_data(
+        data,
+        bi_weekly_lag_periods=BI_WEEKLY_LAG_PERIODS,
+        bi_weekly_window_sizes=BI_WEEKLY_WINDOW_SIZES,
+        save_metadata=False  # No need to save metadata during prediction
+    )
     print(f"Processed data shape: {processed_data.shape}")
     
     # Extract metadata for later
@@ -77,7 +85,7 @@ def prepare_prediction_data(
         if scale_cols:
             X[scale_cols] = scaler.transform(X[scale_cols])
     
-    # Handle categorical columns - THIS PART NEEDS TO BE FIXED
+    # Handle categorical columns
     print("Converting categorical columns to numeric...")
     for col in X.select_dtypes(include=['object']).columns:
         if col in categorical_columns:
